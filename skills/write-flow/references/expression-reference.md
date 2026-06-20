@@ -222,7 +222,7 @@ setVar.variableValue = "Flow.customerName";
 response.messageBody.setExpression('Append("Hello ", Flow.Name, "!")');
 
 // Conditional with string results
-comm.communicationExpression.setExpression(
+comm.communication.setExpression(
     'If(Hour(GetCurrentDateTimeUtc()) < 12, "Good morning", "Good afternoon")'
 );
 ```

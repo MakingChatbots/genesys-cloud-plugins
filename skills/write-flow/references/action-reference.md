@@ -64,7 +64,7 @@ reply.setBodyByLiteralString("Thank you for your email.");
 ### Communicate
 ```typescript
 const comm = actionFactory.addActionCommunicate(container, "Greeting");
-comm.communicationExpression.setExpression('"Hello! How can I help?"');
+comm.communication.setExpression('"Hello! How can I help?"');
 ```
 Note: use quoted strings inside the expression, NOT `ToAudioTTS()`.
 

@@ -4,6 +4,7 @@ import platformClient from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
 import { deployFlow } from "./tools/deploy-flow.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
+import { testBotFlow } from "./tools/test-bot-flow.ts";
 
 const envResults = z
     .object({
@@ -51,6 +52,15 @@ server.registerTool(
     "deploy_flow",
     deployFlowTool.config,
     deployFlowTool.handler,
+);
+
+const testBotFlowTool = testBotFlow({
+    textbotsApi: new platformClient.TextbotsApi(),
+});
+server.registerTool(
+    "test_bot_flow",
+    testBotFlowTool.config,
+    testBotFlowTool.handler,
 );
 
 void (async () => {

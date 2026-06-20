@@ -29,6 +29,12 @@ A bot flow cannot be deleted while another flow references it (e.g. via `CallDig
 
 The JSDoc says it accepts `ArchFlowInfo | ArchFlowInfoBasic`, but the TypeScript declaration only lists `ArchFlowInfoBasic`. Use `as any` to pass `ArchFlowInfo` from `getFlowInfoByFlowNameAsync`.
 
+## checkInAsync vs publishAsync — do not call both
+
+`checkInAsync` saves the flow **and releases the lock**. If you then call `publishAsync`, it tries to save again but fails with a 409 ("Flow is not locked by client"). Use one or the other:
+- `flow.checkInAsync()` — save only (flow is not published)
+- `flow.publishAsync()` — validates, saves, and publishes in one call
+
 ## Validation vs publish
 
 `publishAsync` validates locally first. If validation finds only warnings (not errors), it proceeds. The "Initial Greeting has no audio set" warning is cosmetic and does not block publishing.
@@ -48,6 +54,17 @@ menu.outputMaxNoMatches.enabled = true;      // must explicitly enable
 const freeTextPath = menu.outputMaxNoMatches;
 actionFactory.addActionCommunicate(freeTextPath, "Answer", '"Here is the answer."');
 ```
+
+## NLU in digital bot flows — use botFlowSettings, not AskForIntent
+
+`AskForIntent` (`AskForNLUIntentAction`) throws in digital bot flows: "'AskForNLUIntentAction' cannot be used in flows of type 'digitalbot'". NLU intent recognition IS supported, but through a different mechanism:
+
+1. Pass `nluCreationData` as the 6th parameter to `createFlowDigitalBotAsync`
+2. Use `flow.botFlowSettings.getIntentSettingsByIntentName()` to get intent settings
+3. Call `intentSettings.associateWithTask(task)` to wire intents to reusable tasks
+4. Set `intentSettings.confirmation.setExpression()` for confirmation prompts
+
+When the DigitalMenu receives free-text input, the Dialog Engine checks trained intents before falling through to NoMatch. See the NLU section in `examples/digital-bot-flow.md`.
 
 ## Output path enable/disable
 
@@ -84,6 +101,29 @@ The type definitions declare `setResponseBodyByLiteralString` but it does not ex
 ## Flow naming on re-runs
 
 `createFlow*Async` deletes an existing flow with the same name. This requires `architect:flow:delete` permission. If you don't have it, use a new name or use `checkoutAndLoadFlowByFlowNameAsync` to update existing flows.
+
+## Slot and entity type names must differ
+
+When using `entityTypeBindings` in NLU creation data, the slot name (`entityName`) and entity type name (`entityType`) must be different. Using the same name for both causes a validation error in the Architect UI: "Slots and Slot Types contain duplicate names: X". The SDK's `validateAsync()` does not catch this.
+
+- Wrong: `entityTypeBindings: [{ entityName: "NumberValue", entityType: "NumberValue" }]`
+- Correct: `entityTypeBindings: [{ entityName: "NumberValue", entityType: "NumberPattern" }]`
+
+## ArchValueInteger uses `setLiteralInt`, not `setLiteralInteger`
+
+The method for setting an integer literal is `setLiteralInt(n)`, not `setLiteralInteger(n)`. Similarly, `setDefaultValueAsInteger(n)` exists on flow variables but not on `ArchValueInteger`.
+
+## No-match apology "Sorry." prefix
+
+Bot flows prepend a default "Sorry." before every no-match message via `flow.userInputSettings.noMatchApology`. To remove it:
+
+```typescript
+flow.userInputSettings.noMatchApology.setExpression('""');
+```
+
+## `userInputSettings` is on the flow, not `botFlowSettings`
+
+UX settings like `noMatchApology`, `noMatchesMax`, and `noInputsMax` are accessed via `flow.userInputSettings`, not `flow.botFlowSettings.userInputSettings`. The `botFlowSettings` property is for intent/slot configuration.
 
 ## Division
 

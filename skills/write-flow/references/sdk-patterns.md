@@ -48,9 +48,10 @@ export async function buildFlow(scripting: ArchitectScripting) {
 | Inbound Email | `archFactoryFlows.createFlowInboundEmailAsync(name, description)` |
 | Inbound Message (SMS) | `archFactoryFlows.createFlowInboundShortMessageAsync(name, description)` |
 | Workflow | `archFactoryFlows.createFlowWorkflowAsync(name, description)` |
+| Bot | `archFactoryFlows.createFlowBotAsync(name, description)` |
 | Digital Bot | `archFactoryFlows.createFlowDigitalBotAsync(name, description)` |
 
-All return a Promise that resolves to the flow object.
+All return a Promise that resolves to the flow object. Bot flows and digital bot flows accept an optional `nluCreationData` parameter for NLU intent training — see the bot-flow and digital-bot-flow examples.
 
 ## Initial State / Startup Object
 
@@ -123,6 +124,33 @@ const jumpToTask = archFactoryActions.addActionJumpToTask(someContainer, "jump",
 ```
 
 For circular references (task A → task B → task A), create all tasks as empty shells first, then populate them with actions.
+
+## User Input Settings (Bot Flows)
+
+Bot flows and digital bot flows have `flow.userInputSettings` for controlling UX behaviour during slot and intent collection:
+
+```typescript
+const userInput = flow.userInputSettings;
+
+// Remove the default "Sorry." prefix from no-match messages
+userInput.noMatchApology.setExpression('""');
+
+// Limit no-match retries before outputMaxNoMatches fires
+userInput.noMatchesMax.setLiteralInt(3);
+
+// Limit no-input retries
+userInput.noInputsMax.setLiteralInt(3);
+```
+
+These are on the flow object directly (`flow.userInputSettings`), not on `flow.botFlowSettings`.
+
+## Expression Functions
+
+Useful Architect expression functions for building dynamic text:
+
+- `Append("part1", variable, "part2")` — string concatenation
+- `ToInt(Slot.Name)` — convert a slot value to integer for numeric comparison
+- `ToString(variable)` — convert to string
 
 ## Async Operations
 

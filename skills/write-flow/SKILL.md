@@ -7,14 +7,15 @@ trigger:
   - build a flow
   - architect flow
   - inbound call flow
-  - inbound chat flow
   - inbound email flow
   - inbound message flow
   - IVR flow
-  - chat flow
   - email flow
+  - test a bot flow
+  - test bot flow
   - SMS flow
   - workflow flow
+  - bot flow
   - digital bot flow
   - deploy a flow
 ---
@@ -40,7 +41,7 @@ If the user already has a flow file and just wants to deploy it, skip straight t
 ### 1. Understand the requirement
 
 Ask the user:
-- **Flow type**: inbound call, inbound chat, inbound email, inbound message (SMS), or workflow
+- **Flow type**: inbound call, bot flow, digital bot flow, inbound email, inbound message (SMS), or workflow
 - **What it should do**: routing, menus, greetings, queue transfers, data lookups, etc.
 - **Flow name**: what to name the flow in Architect
 
@@ -55,8 +56,9 @@ Before writing any flow code, read these reference files from this skill:
 3. **Always read**: `references/action-reference.md` — available action types
 4. **Read when the flow uses expressions**: `references/expression-reference.md` — expression language syntax, functions, operators, data types, and common patterns. Read this whenever the flow involves conditional logic, dynamic text, variable manipulation, date/time calculations, or any `setExpression()` / expression property usage.
 5. **Read the matching example** from `references/examples/`:
+   - `bot-flow.md` — bot flow with NLU intent detection, slot filling, and testing
+   - `digital-bot-flow.md` — digital bot with menu, free-text fallback, and exit
    - `inbound-call.md` — IVR with menus and queue transfers
-   - `inbound-chat.md` — chat greeting and queue transfer
    - `inbound-email.md` — auto-reply and queue transfer
    - `inbound-message.md` — SMS auto-reply and queue transfer
    - `workflow.md` — callback workflow
@@ -115,3 +117,31 @@ The tool spawns an isolated process that:
 3. Returns success/failure with SDK logs
 
 If deployment fails, read the error logs carefully — the SDK has three error channels (logging callback, TRACE lines, HTTP errors) and the deploy runner captures all of them.
+
+**Bot flows — publish before testing:** The `deploy_flow` tool checks in the flow but does not publish it. To test a bot flow or digital bot flow with the `test_bot_flow` tool (step 6), the flow must be published first. Replace `flow.checkInAsync()` with `flow.publishAsync()` in the `buildFlow` function — do not call both, because `checkInAsync` releases the lock and `publishAsync` will fail with a 409:
+
+```typescript
+return await flow.publishAsync();
+```
+
+### 6. Test (bot flows and digital bot flows)
+
+After deploying and publishing a bot flow or digital bot flow, test it using the `test_bot_flow` MCP tool. The deploy result includes the flow ID.
+
+**Start a session:**
+```
+Tool: test_bot_flow
+Input: { "flowId": "<flow-id-from-deploy>" }
+```
+
+The tool returns the bot's opening messages and a `sessionId`. Each turn includes `nextActionType`:
+- `WaitForInput` — the bot is waiting for a user message
+- `Disconnect` / `Exit` — the conversation has ended
+
+**Send a message:**
+```
+Tool: test_bot_flow
+Input: { "sessionId": "<session-id>", "message": "Billing" }
+```
+
+Walk through the flow's conversation paths to verify the bot responds correctly. If the bot behaves unexpectedly, update the flow file, re-deploy, re-publish, and test again.
