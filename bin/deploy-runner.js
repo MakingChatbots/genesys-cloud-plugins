@@ -117012,6 +117012,12 @@ var LEVEL_PREFIX = {
   warning: "warn",
   info: "info"
 };
+var publishedFlowId;
+var publishedFlowName;
+var publishSucceeded = false;
+var validationIssues = [];
+var inValidationSummary = false;
+var FLOW_CREATED_RE = /successfully created flow name '(.+?)' \(id: '(.+?)'\)/;
 function installLogging(scripting) {
   const logging = scripting.services.archLogging;
   logging.setLoggingCallback((logMessage) => {
@@ -117019,6 +117025,30 @@ function installLogging(scripting) {
     const msg = logMessage.messageParts?.message || logMessage.messageFull || "";
     if (msg.includes("clientSecret:") || msg.includes("auth token"))
       return false;
+    const created = msg.match(FLOW_CREATED_RE);
+    if (created) {
+      publishedFlowName = created[1];
+      publishedFlowId = created[2];
+    }
+    if (msg.includes("publish successful")) {
+      publishSucceeded = true;
+    }
+    if (msg.includes("Validation Summary Done")) {
+      inValidationSummary = false;
+    } else if (msg.includes("Validation Summary")) {
+      inValidationSummary = true;
+    } else if (inValidationSummary) {
+      const trimmed = msg.trim();
+      if (trimmed && trimmed !== "No validation issues.") {
+        validationIssues.push(trimmed);
+      }
+    }
+    if (level === "warning" || level === "error") {
+      const mappedLevel = LEVEL_PREFIX[level] || "info";
+      if (mappedLevel === "warn" && !msg.includes("end method is being called")) {
+        validationIssues.push(msg);
+      }
+    }
     emit("log", LEVEL_PREFIX[level] || "info", msg);
     return false;
   });
@@ -117135,27 +117165,46 @@ async function main() {
       return;
     }
     const flowResult = await mod.buildFlow(scripting);
-    const flowId = typeof flowResult?.id === "string" ? flowResult.id : void 0;
-    const flowName = typeof flowResult?.name === "string" ? flowResult.name : void 0;
     let warnings;
     if (typeof flowResult?.validateAsync === "function") {
-      const validation = await flowResult.validateAsync();
-      if (validation.hasErrorsOrWarnings) {
-        warnings = [];
-        for (const issue of validation.issues) {
-          const label = issue.archObject?.logStr ?? "Unknown";
-          for (const err of issue.errors ?? [])
-            warnings.push(`ERROR [${label}]: ${err}`);
-          for (const warn of issue.warnings ?? [])
-            warnings.push(`WARN [${label}]: ${warn}`);
+      try {
+        const validation = await flowResult.validateAsync();
+        if (validation.hasErrorsOrWarnings) {
+          warnings = [];
+          for (const issue of validation.issues) {
+            const label = issue.archObject?.logStr ?? "Unknown";
+            for (const err of issue.errors ?? [])
+              warnings.push(`ERROR [${label}]: ${err}`);
+            for (const warn of issue.warnings ?? [])
+              warnings.push(`WARN [${label}]: ${warn}`);
+          }
+          for (const w of warnings) emit("log", "warn", w);
         }
-        for (const w of warnings) emit("log", "warn", w);
+      } catch {
+        if (validationIssues.length > 0) {
+          warnings = validationIssues;
+        }
       }
     }
-    emit("result", { success: true, flowId, flowName, warnings });
+    emit("result", {
+      success: true,
+      flowId: publishedFlowId,
+      flowName: publishedFlowName,
+      warnings
+    });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    emit("result", { success: false, error: message });
+    if (publishSucceeded) {
+      const warnings = validationIssues.length > 0 ? validationIssues : void 0;
+      emit("result", {
+        success: true,
+        flowId: publishedFlowId,
+        flowName: publishedFlowName,
+        warnings
+      });
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      emit("result", { success: false, error: message });
+    }
   } finally {
     session.endExitCode = 0;
     session.end();
