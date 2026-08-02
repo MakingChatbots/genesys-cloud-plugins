@@ -12,6 +12,13 @@ Debug the plugin:
 CLAUDE_PLUGIN_ROOT=$(pwd) claude --plugin-dir . --debug
 ```
 
+Run the tests:
+
+```shell
+pnpm test
+pnpm test:watch
+```
+
 To aid in the development of the MCP server install the MCP Server Skill:
 
 ```
