@@ -24,6 +24,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.4.15
         version: 2.4.15
+      '@makingchatbots/genesys-cloud-architect-diagram-lib':
+        specifier: ^1.1.0
+        version: 1.1.0
       '@types/node':
         specifier: ^25.8.0
         version: 25.9.0
@@ -264,6 +267,10 @@ packages:
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
+
+  '@makingchatbots/genesys-cloud-architect-diagram-lib@1.1.0':
+    resolution: {integrity: sha512-81sCC5Zr/Zhj40JlTehe9FEKqp1w4C/73d5qq/xFHn0scvGDI6Ipb+gbLHF0+nFTy3JKsIDq4Momw9IlAwJ5RQ==, tarball: https://npm.pkg.github.com/download/@makingchatbots/genesys-cloud-architect-diagram-lib/1.1.0/88e1dfee54e903c6178d770e09baaf6e40d19e62}
+    engines: {node: '>=22.12'}
 
   '@modelcontextprotocol/sdk@1.29.0':
     resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
@@ -943,6 +950,8 @@ snapshots:
   '@hono/node-server@1.19.14(hono@4.12.19)':
     dependencies:
       hono: 4.12.19
+
+  '@makingchatbots/genesys-cloud-architect-diagram-lib@1.1.0': {}
 
   '@modelcontextprotocol/sdk@1.29.0(zod@4.4.3)':
     dependencies:

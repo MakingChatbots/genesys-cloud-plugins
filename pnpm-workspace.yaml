@@ -2,3 +2,6 @@ lockfile: true
 
 allowBuilds:
   esbuild: true
+
+minimumReleaseAgeExclude:
+  - '@makingchatbots/genesys-cloud-architect-diagram-lib@1.1.0'

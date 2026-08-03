@@ -1,83 +1,89 @@
 ---
 name: flow-diagram
-description: This skill should be used when the user asks to create an interactive diagram, flowchart, flow visualization, dependency tree, architecture map, state machine, or pipeline view. Common trigger phrases include "visualize", "diagram", "flowchart", "graph", "map out", "show the flow", "draw the dependencies", "create a diagram", or any request where a visual representation of nodes and connections would communicate better than text.
+description: This skill should be used when the user asks to create a diagram, flowchart, flow visualization, dependency tree, architecture map, state machine, or pipeline view — including when they ask for an interactive, explorable, or pan-and-zoom diagram (this skill produces static diagrams and sets that expectation). Common trigger phrases include "visualize", "diagram", "flowchart", "graph", "map out", "show the flow", "draw the dependencies", "create a diagram".
 ---
 
 # Flow Diagram Skill
 
-Create interactive flow diagrams as standalone HTML files using React Flow (@xyflow/react). The diagrams are self-contained (no build step, no npm install), use a dark theme, and open directly in a browser.
+Create flow diagrams as Mermaid — text-based with automatic layout. Mermaid is diffable, cheap to generate, and renders natively in GitHub markdown (READMEs, PR and issue descriptions), Claude artifacts, and most docs tooling.
 
-## When to Use
+For graphs with fewer than 3 nodes or no edges, prefer plain text (ASCII or a markdown table) — not worth a diagram.
 
-Generate a React Flow diagram when:
-- Displaying hierarchical relationships (dependency trees, org charts, call chains)
-- Showing data/control flow between components (pipelines, workflows, request paths)
-- Visualizing state machines or decision trees
-- Mapping architecture (service dependencies, module relationships)
-- Any scenario where a graph of connected nodes communicates better than a table or list
+## Workflow
 
-Prefer plain text (ASCII, markdown table) when the graph has fewer than 3 nodes or no edges. For large diagrams (30+ nodes), consider grouping related nodes into composite cards or splitting into multiple diagrams — browser rendering remains smooth up to ~100 nodes, but readability degrades well before that.
+### 1. Pick the diagram type
 
-## How to Create a Diagram
+| Data | Mermaid type |
+|---|---|
+| Flows, pipelines, decision branches | `flowchart TD` (or `LR` for wide/shallow graphs) |
+| State machines | `stateDiagram-v2` |
+| Dependencies, architecture maps | `flowchart LR` with `subgraph` groupings |
+| Sequences of calls between systems | `sequenceDiagram` |
 
-### 1. Start from the template
+### 2. Write the diagram
 
-Copy `assets/template.html` to the target location. The template contains the tested import map, dark-theme CSS, and React Flow scaffolding. Do not modify the import map URLs or `?external` parameters — they are calibrated to avoid duplicate-React issues.
+```mermaid
+flowchart TD
+    Welcome["Welcome message"] --> Hours{"Business hours?"}
+    Hours -->|open| Queue["Route to Sales queue"]
+    Hours -->|closed| AfterHours["After-hours message"]
+    AfterHours --> Offer{"Leave a voicemail?"}
+    Offer -->|yes| Record["Record voicemail"]
+    Offer -->|no| Finish["End call"]
+    Queue --> Finish
+    Record --> Finish
+```
 
-### 2. Define custom node types
+Syntax gotchas:
+- Quote any label containing parentheses, colons, or other punctuation: `A["Play message (after hours)"]`
+- `end` (lowercase) is a reserved word in flowcharts — use a different node id like `Finish`
+- Edge labels use pipes: `A -->|open| B`
+- Colour node categories with `classDef` + `class`, e.g. `classDef queue fill:#1d4ed8,color:#fff` then `class Queue queue`
 
-Create node components using `createElement` (aliased as `h`). Every node needs `Handle` components for connections. Consult `references/patterns.md` for ready-made node designs:
-- **Card with sub-items** — for nodes with child lists (e.g., a flow listing its data actions)
-- **Simple labeled node** — for minimal states or pipeline steps
-- **Status node** — for nodes with a health/status indicator
+### 3. Deliver it where it will actually render
 
-Register node types in a `nodeTypes` object **outside the App component**.
+Mermaid source is only a picture where something renders it. A fenced block printed into a Claude Code terminal shows as **raw source text, not a diagram** — so pick the delivery form from the destination:
 
-### 3. Define data, nodes, and edges
+| Destination | Deliver as |
+|---|---|
+| GitHub PR or issue description, README, a committed `.md` file | Fenced ` ```mermaid ` block — inline in the response for the user to paste, or written to the file |
+| The user wants to look at the diagram now, in a Claude Code session ("show me", "let me see it") | A standalone HTML file they can open (section 5), or a published Artifact — never bare source in the terminal |
+| Web or desktop chat, or docs tooling that renders Mermaid | Fenced ` ```mermaid ` block |
 
-Build the `initialNodes` and `initialEdges` arrays from the data being visualized.
+When delivering a file or Artifact, still show the Mermaid source inline if it is short — it is the reviewable, diffable form.
 
-Each node needs: `id`, `type` (matching a key in `nodeTypes`), `position: { x, y }`, and `data` (props passed to the node component).
+### 4. Nodes with internal detail
 
-Each edge needs: `id`, `source` (node id), `target` (node id). Optional: `animated`, `label`, `type` (`'smoothstep'` for flowcharts, default bezier for trees).
+When a node needs to show a list of sub-items (e.g., a flow listing the data actions it calls), use multi-line labels with `<br/>` bullets, or group children in a `subgraph`:
 
-### 4. Layout the nodes
+```mermaid
+flowchart LR
+    Main["Main IVR flow<br/>• Lookup-Customer<br/>• Check-Balance"] --> Bot["Billing bot<br/>• Get-Invoice"]
+```
 
-For manual layout strategies (trees, grids, multi-level), see `references/patterns.md` under "Layout Strategies". Use `fitView` on the ReactFlow component to auto-zoom.
+### 5. Standalone HTML
 
-### 5. Add title, legend, and type-specific CSS
+To give the user something openable in a browser, wrap the diagram. The page background must match the Mermaid theme — a `dark` theme diagram on a default white page is washed out and low contrast:
 
-Use the `.diagram-title` and `.legend` overlay classes from the template. Add type badge CSS using the accent color pattern from `references/patterns.md`.
+```html
+<!doctype html>
+<html>
+<body style="margin:0;padding:24px;background:#0f172a">
+<pre class="mermaid">
+flowchart TD
+    A["..."] --> B["..."]
+</pre>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+</script>
+</body>
+</html>
+```
 
-### 6. Replace template placeholders
+This wrapper needs internet access when opened (Mermaid loads from a CDN); the markdown form has no such dependency.
 
-The template has `%%PLACEHOLDER%%` comments marking where to insert content:
-- `%%TITLE%%` — page title
-- `%%CUSTOM_STYLES%%` — type badge classes and additional CSS
-- `%%NODE_TYPES%%` — custom node components and `nodeTypes` object
-- `%%DATA%%` — the `initialNodes` and `initialEdges` arrays
-- `%%LAYOUT%%` — (already part of data if positions are inline)
-- `%%TITLE_OVERLAY%%` — title createElement call
-- `%%LEGEND%%` — legend createElement call
+## Limits
 
-### 7. Open in browser
-
-The resulting HTML file opens directly in any modern browser. No server needed.
-
-## Key Constraints
-
-- **No JSX** — use `createElement` (aliased `h`). No Babel, no build step.
-- **No additional CDN dependencies** — the import map in the template is sufficient.
-- **`nodeTypes` must be defined outside components** — React Flow remounts nodes if the object identity changes per render.
-- **Dark theme only** — the CSS is designed for the `#0f172a` background. Changing to light theme requires restyling all components.
-
-## Additional Resources
-
-### Reference Files
-- **`references/patterns.md`** — Import map details, createElement syntax, layout strategies (tree/grid/multi-level), edge types, color palette, and ready-made node component patterns
-
-### Asset Files
-- **`assets/template.html`** — Base HTML template with the working import map, dark-theme CSS, and React Flow scaffolding. Copy this as the starting point for every diagram.
-
-### Example Files
-- **`examples/dependency-tree.html`** — Complete working diagram showing a Genesys Cloud Architect flow dependency tree with 3 nodes, custom card nodes with sub-item lists, animated edges, title overlay, and legend. Use as a reference for the expected end result.
+- Layout is automatic and cannot be hand-tuned. For dense graphs (30+ heavily cross-linked nodes), split into multiple diagrams or use `subgraph` groupings rather than fighting the layout.
+- Output is static — no pan, zoom, or drag. If the user asks for an interactive or explorable diagram, say plainly that this skill produces static Mermaid diagrams, then offer a browser-viewable HTML file (section 5) and splitting a large graph into focused views. Do not build a bespoke interactive diagram instead.

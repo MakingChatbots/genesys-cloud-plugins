@@ -4,6 +4,7 @@ import platformClient from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
 import { deployFlow } from "./tools/deploy-flow.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
+import { flowIr } from "./tools/flow-ir.ts";
 import { testBotFlow } from "./tools/test-bot-flow.ts";
 
 const envResults = z
@@ -33,14 +34,17 @@ const server = new McpServer({
     version: process.env.npm_package_version ?? "0.0.0",
 });
 
-const flowDependenciesTool = flowDependencies({
-    architectApi: new platformClient.ArchitectApi(),
-});
+const architectApi = new platformClient.ArchitectApi();
+
+const flowDependenciesTool = flowDependencies({ architectApi });
 server.registerTool(
     "flow_dependencies",
     flowDependenciesTool.config,
     flowDependenciesTool.handler,
 );
+
+const flowIrTool = flowIr({ architectApi });
+server.registerTool("flow_ir", flowIrTool.config, flowIrTool.handler);
 
 const deployFlowTool = deployFlow({
     region: envVars.GENESYS_REGION,
