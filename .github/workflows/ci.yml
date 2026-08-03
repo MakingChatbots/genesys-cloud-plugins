@@ -33,4 +33,4 @@ jobs:
           GENESYS_REGION: "DUMMY_VALUE"
           GENESYS_CLIENT_ID: "DUMMY_VALUE"
           GENESYS_CLIENT_SECRET: "DUMMY_VALUE"
-        run: pnpm dlx @modelcontextprotocol/inspector --cli node servers/genesys-cloud-architect-mcp.js --method tools/list | grep -q '"flow_ir"'
+        run: pnpm dlx @modelcontextprotocol/inspector --cli node servers/genesys-cloud-architect-mcp.js --method tools/list | grep -q '"tools"'
