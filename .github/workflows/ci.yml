@@ -24,7 +24,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm run lint
-#      - run: pnpm run test
       - run: pnpm run build
       - name: Smoke test MCP server
         run: >

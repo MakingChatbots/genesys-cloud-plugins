@@ -7,8 +7,6 @@
     "build": "pnpm run build:mcp-server && pnpm run build:deploy-runner",
     "build:mcp-server": "esbuild src/mcp-server/index.ts --bundle --platform=node --target=node22 --format=cjs --minify --tree-shaking=true --define:process.env.npm_package_version=\\\"$npm_package_version\\\" --outfile=servers/genesys-cloud-architect-mcp.js",
     "build:deploy-runner": "esbuild src/deploy-runner/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=bin/deploy-runner.js",
-    "test": "vitest run",
-    "test:watch": "vitest",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "format": "biome format --write",
@@ -29,7 +27,6 @@
     "@types/node": "^25.8.0",
     "esbuild": "^0.25.0",
     "husky": "^9.1.7",
-    "typescript": "^5.8.0",
-    "vitest": "^4.1.10"
+    "typescript": "^5.8.0"
   }
 }
