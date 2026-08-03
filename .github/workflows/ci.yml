@@ -27,9 +27,7 @@ jobs:
 #      - run: pnpm run test
       - run: pnpm run build
       - name: Smoke test MCP server
-        run: pnpm dlx @modelcontextprotocol/inspector \
-             --cli node servers/genesys-cloud-architect-mcp.js \
-             --method tools/list \
+        run: pnpm dlx @modelcontextprotocol/inspector@2.0.0 --cli node servers/genesys-cloud-architect-mcp.js --method tools/list \
              -e PREVENT_LOGIN=TRUE \
              -e GENESYS_REGION=DUMMY_VALUE \
              -e GENESYS_CLIENT_ID=DUMMY_VALUE \
