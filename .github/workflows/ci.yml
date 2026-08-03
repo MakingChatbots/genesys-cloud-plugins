@@ -27,10 +27,12 @@ jobs:
 #      - run: pnpm run test
       - run: pnpm run build
       - name: Smoke test MCP server
-        env:
-          PREVENT_LOGIN: "TRUE"
-          DEPLOY_SCRIPT_PATH: "DUMMY_VALUE"
-          GENESYS_REGION: "DUMMY_VALUE"
-          GENESYS_CLIENT_ID: "DUMMY_VALUE"
-          GENESYS_CLIENT_SECRET: "DUMMY_VALUE"
-        run: pnpm dlx @modelcontextprotocol/inspector --cli node servers/genesys-cloud-architect-mcp.js --method tools/list | grep -q '"tools"'
+        run: pnpm dlx @modelcontextprotocol/inspector \
+             --cli node servers/genesys-cloud-architect-mcp.js \
+             --method tools/list \
+             -e PREVENT_LOGIN=TRUE \
+             -e GENESYS_REGION=DUMMY_VALUE \
+             -e GENESYS_CLIENT_ID=DUMMY_VALUE \
+             -e GENESYS_CLIENT_SECRET=DUMMY_VALUE \
+             -e DEPLOY_SCRIPT_PATH=DUMMY_VALUE \
+             | grep -q '"flow_ir"'
