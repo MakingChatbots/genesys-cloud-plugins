@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: This skill should be used when interpreting the JSON returned by the flow_ir tool, or when the user asks structural questions about a deployed Genesys Cloud Architect flow, such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON.
+description: This skill should be used when interpreting the JSON returned by the flow_ir or flow_action tools, or when the user asks questions about a deployed Genesys Cloud Architect flow. Structural questions such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Semantic questions such as "what does this decision check", "what prompt does it play", "what does this data action send", or "what does pressing 2 do". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON, and to fetch the per-action settings the IR omits.
 ---
 
 # Interpreting Flow IRs
@@ -10,6 +10,10 @@ the flow parsed into an explicit control-flow graph, flattened to a node list.
 Branches, loops, IVR menu choices, and cross-task jumps are already resolved
 into edges. Answer structural questions from this IR, never by re-deriving
 control flow from the flow's raw configuration JSON.
+
+The two tools are a pair: `flow_ir` owns **structure** — what connects to what —
+and `flow_action` owns **semantics** — what an individual action is configured to
+do (see "Action semantics").
 
 ## Tool output shape
 
@@ -95,6 +99,69 @@ optional `task` parameter to fetch one task at a time:
   absent from the filtered `nodes` array. That is a cross-task jump, not a
   dangling reference.
 
+## Action semantics: the `flow_action` tool
+
+The IR deliberately omits action settings — a Decision's expression, a
+Communicate's prompt text, a data action's inputs. `flow_action` returns those
+raw settings for actions you name.
+
+**The join.** Every IR node with `kind: "action"` has an `id` that *is* the
+Architect GUID, which is exactly what `flow_action`'s `actionIds` accepts. So the
+workflow is: trace structurally with `flow_ir` first, collect every action whose
+configuration matters, then make **one batched call**. Do not call once per
+action; each call refetches the whole flow configuration.
+
+**The envelope.**
+`{ flowId, found: [{ actionId, action, taskId, taskName, menuChoice? }], notFound, notes? }`
+
+- `actionId` echoes the id you asked for and is the grouping key. An action id
+  occurring more than once in a flow yields **several `found` entries**, one per
+  occurrence, told apart by `taskId`. Group by `actionId`; do not assume one
+  entry per id.
+- `action` is the raw Genesys JSON subtree, passed through untouched. It is **not
+  a stable schema**: field names and nesting vary by `__type` and change when
+  Architect changes. Read it defensively and report what is actually there rather
+  than asserting a fixed shape.
+- `notes`, when present, is advisory prose about the lookup itself. Read it, but
+  key no logic off its exact wording.
+
+**Scoping rule — the one thing not to do.** Never derive control flow from the
+raw wiring fields (`nextAction`, `paths[].nextActionId`, `path`). The IR has
+already resolved those, and its resolution accounts for what the raw JSON does
+not reflect: disabled branches, edges dropped for unknown endpoints, and
+menu/task-jump indirection. Where raw JSON and the IR seem to disagree about
+where something leads, the IR is the answer.
+
+The nuance: a `paths[]` entry's pairing of a **condition with a named outcome**
+is legitimate semantics, and often the very reason to make the lookup — which
+case expression belongs to which Switch outcome, which expression a Decision's
+Yes/No tests. Take the condition and the outcome name from the raw action; take
+where that outcome *leads* from the IR's branch-output node, never from
+`nextActionId`.
+
+**Branch-output ids.** `<actionId>::<outputId>` is accepted: the suffix is
+stripped, the underlying action is returned, and `notes` flags that it happened.
+Prefer passing plain action GUIDs. `<taskId>::start` is a task marker rather than
+an action, so it can never match.
+
+**`menuChoice`.** Present only when the action sits inside an IVR menu choice.
+Its `digit` and `name` are the choice's *presentation* — the keypress and the
+spoken or displayed label that select that action. This is what answers "what
+does pressing 2 do".
+
+**`notFound` and staleness.** An id in `notFound` is absent from the flow's
+*latest* configuration. Because `flow_ir` and `flow_action` are separate fetches,
+the flow may have been redeployed between them. Re-run `flow_ir` and re-join
+before concluding that an action was deleted.
+
+**What it does and does not unlock.** `flow_action` does retrieve raw config for
+actions the IR treats as blind spots: a `DigitalMenuAction`'s unexpanded choices
+live in its subtree, and a listen action's own settings come back in full. It
+does **not** close the intent-routing gap — per-intent routing lives in the
+flow's top-level `nluMetaData`, not under any action, so no action lookup can
+reveal it. Intent fan-out stays unresolved, and reachability claims still need
+the qualification described in "Known blind spots".
+
 ## Analysis recipes
 
 **Trace "what happens when..."**: walk successors from the entry task-start,
@@ -148,7 +215,8 @@ human-readable and non-contractual; key all reasoning off `code`.
 - **Intent routing is absent** (see `UNRESOLVED_INTENT_FANOUT`). Qualify
   reachability and path claims wherever a listen action appears.
 - **Digital-bot menu choices** (`DigitalMenuAction`) are not expanded. IVR
-  `menuChoiceList` menus are resolved.
+  `menuChoiceList` menus are resolved. The unexpanded choices are visible in the
+  action's raw config via `flow_action`, but their routing is not in the graph.
 - **Loop back-edges are not synthesised**: a loop body's tail does not point
   back to the loop head, and `ExitLoopAction` is not resolved. Do not report
   "the loop never repeats"; that is a modelling gap, not a flow defect.
