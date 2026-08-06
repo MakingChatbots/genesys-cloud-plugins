@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import platformClient from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
 import { deployFlow } from "./tools/deploy-flow.ts";
+import { flowAction } from "./tools/flow-action.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
 import { flowIr } from "./tools/flow-ir.ts";
 import { testBotFlow } from "./tools/test-bot-flow.ts";
@@ -45,6 +46,13 @@ server.registerTool(
 
 const flowIrTool = flowIr({ architectApi });
 server.registerTool("flow_ir", flowIrTool.config, flowIrTool.handler);
+
+const flowActionTool = flowAction({ architectApi });
+server.registerTool(
+    "flow_action",
+    flowActionTool.config,
+    flowActionTool.handler,
+);
 
 const deployFlowTool = deployFlow({
     region: envVars.GENESYS_REGION,
