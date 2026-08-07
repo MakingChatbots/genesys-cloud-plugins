@@ -147,7 +147,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 
 Logs:
 ${r.join(`
-`)}`}]})},tz),p="";u.stdout.on("data",d=>{p+=d.toString();let g=p.split(`
+`)}`}]})},tz);u.on("error",d=>{l({isError:!0,content:[{type:"text",text:`Failed to start deploy runner: ${d.message}`}]})});let p="";u.stdout.on("data",d=>{p+=d.toString();let g=p.split(`
 `);p=g.pop()??"";for(let m of g)if(m.trim())try{let f=JSON.parse(m);f.type==="log"?r.push(`[${f.level}] ${f.message}`):f.type==="result"&&(s=f)}catch{r.push(m)}});let h="";u.stderr.on("data",d=>{h+=d.toString()}),u.on("close",d=>{if(p.trim())try{let f=JSON.parse(p.trim());f.type==="result"?s=f:f.type==="log"&&r.push(`[${f.level}] ${f.message}`)}catch{p.trim()&&r.push(p.trim())}let g=h.split(`
 `).filter(f=>!f.includes("url.parse()")&&!f.includes("[DEP0169]")).join(`
 `).trim();g&&r.push(`[stderr] ${g}`);let m=r.length?`

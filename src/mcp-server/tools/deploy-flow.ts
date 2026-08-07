@@ -102,6 +102,18 @@ export const deployFlow: ToolFactory<DeployFlowConfig> = (toolConfig) => ({
                 });
             }, DEPLOY_TIMEOUT_MS);
 
+            child.on("error", (err) => {
+                settle({
+                    isError: true,
+                    content: [
+                        {
+                            type: "text",
+                            text: `Failed to start deploy runner: ${err.message}`,
+                        },
+                    ],
+                });
+            });
+
             let stdoutBuf = "";
             child.stdout.on("data", (chunk: Buffer) => {
                 stdoutBuf += chunk.toString();
