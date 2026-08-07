@@ -61,9 +61,31 @@ export interface TestBotFlowConfig {
     textbotsApi: TextbotsApi;
 }
 
-export const testBotFlow: ToolFactory<TestBotFlowConfig> = ({
-    textbotsApi,
-}) => ({
+const inputSchema = {
+    flowId: z
+        .string()
+        .optional()
+        .describe(
+            "The bot flow ID to test. Required when starting a new session.",
+        ),
+    sessionId: z
+        .string()
+        .optional()
+        .describe(
+            "Session ID from a previous call. Required when continuing an existing conversation.",
+        ),
+    message: z
+        .string()
+        .optional()
+        .describe(
+            "User message to send to the bot. Required when continuing a session.",
+        ),
+};
+
+export const testBotFlow: ToolFactory<
+    TestBotFlowConfig,
+    typeof inputSchema
+> = ({ textbotsApi }) => ({
     config: {
         description:
             "Tests a deployed Genesys Cloud Architect Bot Flow and Digital Bot Flow by simulating a text conversation. " +
@@ -77,26 +99,7 @@ export const testBotFlow: ToolFactory<TestBotFlowConfig> = ({
             readOnlyHint: false,
             destructiveHint: false,
         },
-        inputSchema: {
-            flowId: z
-                .string()
-                .optional()
-                .describe(
-                    "The bot flow ID to test. Required when starting a new session.",
-                ),
-            sessionId: z
-                .string()
-                .optional()
-                .describe(
-                    "Session ID from a previous call. Required when continuing an existing conversation.",
-                ),
-            message: z
-                .string()
-                .optional()
-                .describe(
-                    "User message to send to the bot. Required when continuing a session.",
-                ),
-        },
+        inputSchema,
     },
     handler: async ({ flowId, sessionId, message }) => {
         try {
@@ -124,21 +127,9 @@ export const testBotFlow: ToolFactory<TestBotFlowConfig> = ({
                 };
             }
 
-            if (sessionId && !message) {
-                return {
-                    isError: true,
-                    content: [
-                        {
-                            type: "text",
-                            text: "A message is required when continuing an existing session.",
-                        },
-                    ],
-                };
-            }
-
             if (flowId) {
                 const session = await textbotsApi.postTextbotsBotflowsSessions({
-                    flow: { id: flowId as string },
+                    flow: { id: flowId },
                     externalSessionId: "",
                     inputData: { variables: {} },
                     channel: {
@@ -164,7 +155,19 @@ export const testBotFlow: ToolFactory<TestBotFlowConfig> = ({
                 return drainNoOps(textbotsApi, session.id, turn);
             }
 
-            const previousTurnId = sessions.get(sessionId as string);
+            if (!sessionId || !message) {
+                return {
+                    isError: true,
+                    content: [
+                        {
+                            type: "text",
+                            text: "A message is required when continuing an existing session.",
+                        },
+                    ],
+                };
+            }
+
+            const previousTurnId = sessions.get(sessionId);
             if (!previousTurnId) {
                 return {
                     isError: true,
@@ -178,7 +181,7 @@ export const testBotFlow: ToolFactory<TestBotFlowConfig> = ({
             }
 
             const turn = await textbotsApi.postTextbotsBotflowsSessionTurns(
-                sessionId as string,
+                sessionId,
                 {
                     previousTurn: { id: previousTurnId },
                     inputEventType: "UserInput",
@@ -187,7 +190,7 @@ export const testBotFlow: ToolFactory<TestBotFlowConfig> = ({
                         alternatives: [
                             {
                                 transcript: {
-                                    text: message as string,
+                                    text: message,
                                 },
                             },
                         ],
@@ -195,7 +198,7 @@ export const testBotFlow: ToolFactory<TestBotFlowConfig> = ({
                 },
             );
 
-            return drainNoOps(textbotsApi, sessionId as string, turn);
+            return drainNoOps(textbotsApi, sessionId, turn);
         } catch (err) {
             return {
                 isError: true,

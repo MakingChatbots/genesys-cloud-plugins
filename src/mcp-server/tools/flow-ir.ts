@@ -31,7 +31,22 @@ export interface ToolConfig {
     architectApi: ArchitectApi;
 }
 
-export const flowIr: ToolFactory<ToolConfig> = ({
+const inputSchema = {
+    flowId: z.string().min(1).describe("The Genesys Cloud Architect flow ID"),
+    task: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+            "Optional. Restrict the returned nodes to a single task, by task id or " +
+                "task name (case-insensitive). Use this to explore a large flow one " +
+                "task at a time. The full task list is always returned, and a node's " +
+                "predecessors may reference nodes in other tasks, which will not " +
+                "appear in the filtered node list.",
+        ),
+};
+
+export const flowIr: ToolFactory<ToolConfig, typeof inputSchema> = ({
     architectApi,
 }: ToolConfig) => ({
     config: {
@@ -46,30 +61,13 @@ export const flowIr: ToolFactory<ToolConfig> = ({
             readOnlyHint: true,
             destructiveHint: false,
         },
-        inputSchema: {
-            flowId: z
-                .string()
-                .min(1)
-                .describe("The Genesys Cloud Architect flow ID"),
-            task: z
-                .string()
-                .min(1)
-                .optional()
-                .describe(
-                    "Optional. Restrict the returned nodes to a single task, by task id or " +
-                        "task name (case-insensitive). Use this to explore a large flow one " +
-                        "task at a time. The full task list is always returned, and a node's " +
-                        "predecessors may reference nodes in other tasks, which will not " +
-                        "appear in the filtered node list.",
-                ),
-        },
+        inputSchema,
     },
     handler: async ({ flowId, task }) => {
         let configuration: unknown;
         try {
-            configuration = await architectApi.getFlowLatestconfiguration(
-                flowId as string,
-            );
+            configuration =
+                await architectApi.getFlowLatestconfiguration(flowId);
         } catch {
             return {
                 isError: true,

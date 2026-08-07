@@ -50,7 +50,22 @@ function planLookups(requestedIds: readonly string[]): {
     return { lookupIds, requestedFor, strippedAny };
 }
 
-export const flowAction: ToolFactory<ToolConfig> = ({
+const inputSchema = {
+    flowId: z.string().min(1).describe("The Genesys Cloud Architect flow ID"),
+    actionIds: z
+        .array(z.string().min(1))
+        .min(1)
+        .max(MAX_ACTION_IDS)
+        .describe(
+            "Action GUIDs, taken from the `id` of flow_ir nodes whose `kind` is " +
+                '"action". Batch every action of interest into one call rather than ' +
+                "calling this tool repeatedly. Branch-output ids of the form " +
+                "`<actionId>::<outputId>` are also accepted; the suffix is stripped and " +
+                `the underlying action is returned. Maximum ${MAX_ACTION_IDS} ids.`,
+        ),
+};
+
+export const flowAction: ToolFactory<ToolConfig, typeof inputSchema> = ({
     architectApi,
 }: ToolConfig) => ({
     config: {
@@ -68,30 +83,13 @@ export const flowAction: ToolFactory<ToolConfig> = ({
             readOnlyHint: true,
             destructiveHint: false,
         },
-        inputSchema: {
-            flowId: z
-                .string()
-                .min(1)
-                .describe("The Genesys Cloud Architect flow ID"),
-            actionIds: z
-                .array(z.string().min(1))
-                .min(1)
-                .max(MAX_ACTION_IDS)
-                .describe(
-                    "Action GUIDs, taken from the `id` of flow_ir nodes whose `kind` is " +
-                        '"action". Batch every action of interest into one call rather than ' +
-                        "calling this tool repeatedly. Branch-output ids of the form " +
-                        "`<actionId>::<outputId>` are also accepted; the suffix is stripped and " +
-                        `the underlying action is returned. Maximum ${MAX_ACTION_IDS} ids.`,
-                ),
-        },
+        inputSchema,
     },
     handler: async ({ flowId, actionIds }) => {
         let configuration: unknown;
         try {
-            configuration = await architectApi.getFlowLatestconfiguration(
-                flowId as string,
-            );
+            configuration =
+                await architectApi.getFlowLatestconfiguration(flowId);
         } catch {
             return {
                 isError: true,
@@ -104,9 +102,7 @@ export const flowAction: ToolFactory<ToolConfig> = ({
             };
         }
 
-        const { lookupIds, requestedFor, strippedAny } = planLookups(
-            actionIds as string[],
-        );
+        const { lookupIds, requestedFor, strippedAny } = planLookups(actionIds);
         // `findRawActions` never throws and always answers for every id, so a
         // batch where nothing matched is still a successful lookup.
         const lookup = findRawActions(configuration, lookupIds);

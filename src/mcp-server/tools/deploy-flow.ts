@@ -24,7 +24,13 @@ export interface DeployFlowConfig {
     readonly clientSecret: string;
 }
 
-export const deployFlow: ToolFactory<DeployFlowConfig> = (toolConfig) => ({
+const inputSchema = {
+    flowFile: z.string().min(1).describe("Path to the TypeScript flow file"),
+};
+
+export const deployFlow: ToolFactory<DeployFlowConfig, typeof inputSchema> = (
+    toolConfig,
+) => ({
     config: {
         description:
             "Deploys a Genesys Cloud Architect flow from a TypeScript file. " +
@@ -36,15 +42,10 @@ export const deployFlow: ToolFactory<DeployFlowConfig> = (toolConfig) => ({
             readOnlyHint: false,
             destructiveHint: true,
         },
-        inputSchema: {
-            flowFile: z
-                .string()
-                .min(1)
-                .describe("Path to the TypeScript flow file"),
-        },
+        inputSchema,
     },
     handler: async ({ flowFile }) => {
-        const absolutePath = path.resolve(flowFile as string);
+        const absolutePath = path.resolve(flowFile);
         if (!fs.existsSync(absolutePath)) {
             return {
                 isError: true,
@@ -101,6 +102,18 @@ export const deployFlow: ToolFactory<DeployFlowConfig> = (toolConfig) => ({
                     ],
                 });
             }, DEPLOY_TIMEOUT_MS);
+
+            child.on("error", (err) => {
+                settle({
+                    isError: true,
+                    content: [
+                        {
+                            type: "text",
+                            text: `Failed to start deploy runner: ${err.message}`,
+                        },
+                    ],
+                });
+            });
 
             let stdoutBuf = "";
             child.stdout.on("data", (chunk: Buffer) => {

@@ -1,5 +1,5 @@
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import type { ZodRawShape } from "zod/v3";
+import type { objectOutputType, ZodRawShape, ZodTypeAny } from "zod/v3";
 
 export type ToolConfig<T extends ZodRawShape = ZodRawShape> = {
     config: {
@@ -7,7 +7,7 @@ export type ToolConfig<T extends ZodRawShape = ZodRawShape> = {
         annotations: ToolAnnotations;
         inputSchema: T;
     };
-    handler: (args: Record<string, unknown>) => Promise<{
+    handler: (args: objectOutputType<T, ZodTypeAny>) => Promise<{
         isError?: boolean;
         content: Array<{ type: "text"; text: string }>;
     }>;

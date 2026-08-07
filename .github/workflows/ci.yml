@@ -24,7 +24,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm run lint
+      - run: pnpm run typecheck # Check TS types. Not done by linting or building
       - run: pnpm run build
+      - name: Verify committed bundles match source
+        run: |
+          git diff --stat --exit-code servers/ bin/ || {
+            echo "::error::Committed bundles are out of sync with source. Run 'pnpm run build' and commit the result."
+            exit 1
+          }
       - name: Smoke test MCP server
         run: >
           pnpm dlx @modelcontextprotocol/inspector --cli node servers/genesys-cloud-architect-mcp.js --method tools/list
