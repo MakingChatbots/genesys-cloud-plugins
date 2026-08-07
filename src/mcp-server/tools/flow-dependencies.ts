@@ -52,7 +52,11 @@ export interface ToolConfig {
     architectApi: ArchitectApi;
 }
 
-export const flowDependencies: ToolFactory<ToolConfig> = ({
+const inputSchema = {
+    flowId: z.string().min(1).describe("The Genesys Cloud Architect flow ID"),
+};
+
+export const flowDependencies: ToolFactory<ToolConfig, typeof inputSchema> = ({
     architectApi,
 }: ToolConfig) => ({
     config: {
@@ -64,18 +68,13 @@ export const flowDependencies: ToolFactory<ToolConfig> = ({
             readOnlyHint: true,
             destructiveHint: false,
         },
-        inputSchema: {
-            flowId: z
-                .string()
-                .min(1)
-                .describe("The Genesys Cloud Architect flow ID"),
-        },
+        inputSchema,
     },
     handler: async ({ flowId }) => {
         try {
             let flow: platformClient.Models.Flow;
             try {
-                flow = await architectApi.getFlow(flowId as string);
+                flow = await architectApi.getFlow(flowId);
             } catch {
                 return {
                     isError: true,
