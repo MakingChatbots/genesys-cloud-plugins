@@ -26,7 +26,6 @@
     "inspect-mcp": "pnpm dlx @modelcontextprotocol/inspector node servers/genesys-cloud-architect-mcp.js",
     "mcp-server": "node --experimental-strip-types src/mcp-server/index.ts",
     "mcp-server-with-op": "op run --env-file='./.env' -- node --experimental-strip-types src/mcp-server/index.ts",
-    "mcp-server-with-op-test": "op run --env-file='./.env' -- node --experimental-strip-types src/mcp-server/http-server.dev.ts",
     "prepare": "husky"
   },
   "dependencies": {
