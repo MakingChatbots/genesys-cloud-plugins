@@ -7,6 +7,7 @@
     "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
+    "types": ["node"],
     "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": "src"
