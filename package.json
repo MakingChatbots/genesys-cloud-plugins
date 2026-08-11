@@ -14,7 +14,7 @@
   "bugs": {
     "url": "https://github.com/MakingChatbots/genesys-cloud-plugins/issues"
   },
-  "homepage": "https://makingchatbots.com",
+  "homepage": "https://makingchatbots.com/p/claude-code-plugin-genesys-cloud",
   "scripts": {
     "build": "pnpm run build:mcp-server && pnpm run build:deploy-runner",
     "build:mcp-server": "esbuild src/mcp-server/index.ts --bundle --platform=node --target=node22 --format=cjs --minify --tree-shaking=true --define:process.env.npm_package_version=\\\"$npm_package_version\\\" --outfile=servers/genesys-cloud-architect-mcp.js",
