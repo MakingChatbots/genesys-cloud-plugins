@@ -1,7 +1,7 @@
 {
   "name": "genesys-cloud-architect",
   "description": "Create, test, and debug Genesys Cloud Architect flows",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "author": {
     "name": "Lucas Woodward",
     "url": "https://makingchatbots.com/"
