@@ -42,7 +42,8 @@ Each node:
 | `actionType`         | Architect `__type` (e.g. `DecisionAction`), actions only                                                                                                              |
 | `label`              | Human-readable name (action name, task name, or branch label like `Failure`)                                                                                          |
 | `description`        | Optional summary of what the action does                                                                                                                              |
-| `predecessors`       | **Incoming** edges `{ id, label?, backEdge }`; see "Navigating"                                                                                                       |
+| `predecessors`       | **Incoming** edges `{ id, label?, backEdge }`; `id` is the source node. See "Navigating"                                                                              |
+| `successors`         | **Outgoing** edges `{ id, label?, backEdge }`; `id` is the target node. Mirror of `predecessors`; see "Navigating"                                                    |
 | `order`              | DFS discovery order, not execution order; sibling branches appear sequentially                                                                                        |
 | `taskId`, `taskName` | Owning task                                                                                                                                                           |
 | `reachable`          | Reached by DFS from **any** task-start; see the orphaned-tasks recipe                                                                                                 |
@@ -57,30 +58,36 @@ Each node:
   actions in a task".
 - **`branch-output`**: one per outcome of a branching action (a Decision's
   Yes/No, a data action's Success/Failure, a loop's body). Not an action; it is
-  a labelled fork. A branch-output with no successors is a dangling outcome
+  a labelled fork. A branch-output with `successors: []` is a dangling outcome
   (see recipes).
 
 ## Navigating the graph
 
-Edges are stored **incoming**: each node lists its predecessors, not its
-successors. To answer "what happens next", invert once:
+Every node carries its edges **both ways**. Pick the direction that matches the
+question instead of deriving one from the other:
 
-1. Build a successor map: for every node N and every predecessor P in
-   `N.predecessors`, record "P leads to N" with the predecessor's `label` and
-   `backEdge`.
-2. Trace forward from `<entryTaskId>::start` for the caller-visible path. Pass
-   through branch-output nodes, using their `label` as the branch condition
-   ("on Failure, ..."). If `entryTaskId` is absent, say the entry is unknown
-   rather than guessing a starting task.
-3. Stop a trace at `terminal: true` nodes.
+- **`successors`** (outgoing) for forward walks — "the caller presses 1, then
+  what?", "what happens after this action".
+- **`predecessors`** (incoming) for backwards walks — "what leads here", "what
+  condition guards this action", "does anything call this task".
 
-Edge `label` carries the branch or jump meaning: branch outcome labels
-(`Success`, `Failure`, `Yes`/`No`), IVR menu choice names, and the target task
-name on jump edges. `backEdge: true` marks a real cycle.
+There is never a reason to build a successor map by inverting `predecessors`;
+the IR already ships both lists, mirrored and deduped.
 
-An unlabelled predecessor pointing directly at a branching action (not at one
-of its branch-outputs) is that action's fall-through: the path taken after the
-action completes, e.g. a loop's continue-after-exit edge.
+**Forward trace.** Start at `<entryTaskId>::start` and follow `successors`,
+passing through branch-output nodes and using their `label` as the branch
+condition ("on Failure, ..."). If `entryTaskId` is absent, say the entry is
+unknown rather than guessing a starting task. Stop a trace at `terminal: true`
+nodes.
+
+Edge `label` carries the branch or jump meaning in **both** lists: branch
+outcome labels (`Success`, `Failure`, `Yes`/`No`), IVR menu choice names, and
+the target task name on jump edges. `backEdge: true`, in either list, marks a
+real cycle.
+
+An unlabelled **successor** leaving a branching action directly (rather than
+leaving one of its branch-outputs) is that action's fall-through: the path taken
+after the action completes, e.g. a loop's continue-after-exit edge.
 
 Never narrate `nodes` in array order as if it were the call sequence. `order`
 is depth-first discovery: after a branch, one entire arm appears before the
@@ -95,9 +102,9 @@ optional `task` parameter to fetch one task at a time:
   shared by several tasks is refused with the candidate ids; retry with an id.
 - `ir.tasks` always lists every task even when filtered, so the full inventory
   survives; walk tasks one call each.
-- A filtered node's `predecessors` may name ids from other tasks; those ids are
-  absent from the filtered `nodes` array. That is a cross-task jump, not a
-  dangling reference.
+- A filtered node's `predecessors` and `successors` may both name ids from other
+  tasks; those ids are absent from the filtered `nodes` array. That is a
+  cross-task jump, not a dangling reference.
 
 ## Action semantics: the `flow_action` tool
 
@@ -169,9 +176,10 @@ narrating action labels and branch labels at each fork. Present paths as the
 caller would experience them, not as node ids.
 
 **Missing error handling**: find `branch-output` nodes whose label indicates
-failure, error, or timeout, with `terminal: false` and no successors. That
-outcome silently drops out of the flow. (A terminal branch-output with no
-successor is correct, e.g. a transfer's Success leaves the flow by design.)
+failure, error, or timeout, with `terminal: false` and `successors: []`. That
+outcome silently drops out of the flow. (A terminal branch-output with
+`successors: []` is correct, e.g. a transfer's Success leaves the flow by
+design.)
 
 **Dead logic**: first check `reachabilityIsComplete`. When `true`,
 `reachable: false` nodes (grouped by `taskName`) are provably orphaned actions
@@ -186,8 +194,9 @@ task's `<taskId>::start` node (excluding `entryTaskId`): **zero predecessors
 means nothing jumps to it**. Qualify this too when `reachabilityIsComplete` is
 false, since an intent may jump to the task.
 
-**Loops**: any predecessor with `backEdge: true` closes a real cycle. Describe
-the cycle path and check it has a terminal or branch exit.
+**Loops**: any predecessor with `backEdge: true` closes a real cycle; walking
+forward, the same cycle shows as a successor with `backEdge: true`. Describe the
+cycle path and check it has a terminal or branch exit.
 
 **How does the flow end**: list `terminal: true` action nodes (disconnects,
 end-flow/end-task, transfers). Transfers are terminal on success only; their

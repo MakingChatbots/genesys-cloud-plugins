@@ -41,8 +41,8 @@ const inputSchema = {
             "Optional. Restrict the returned nodes to a single task, by task id or " +
                 "task name (case-insensitive). Use this to explore a large flow one " +
                 "task at a time. The full task list is always returned, and a node's " +
-                "predecessors may reference nodes in other tasks, which will not " +
-                "appear in the filtered node list.",
+                "predecessors and successors may reference nodes in other tasks, which " +
+                "will not appear in the filtered node list.",
         ),
 };
 
