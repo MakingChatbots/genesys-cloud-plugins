@@ -115,8 +115,11 @@ raw settings for actions you name.
 **The join.** Every IR node with `kind: "action"` has an `id` that *is* the
 Architect GUID, which is exactly what `flow_action`'s `actionIds` accepts. So the
 workflow is: trace structurally with `flow_ir` first, collect every action whose
-configuration matters, then make **one batched call**. Do not call once per
-action; each call refetches the whole flow configuration.
+configuration matters, then batch them into **as few calls as possible**. Do not
+call once per action; each call refetches the whole flow configuration. A single
+call accepts at most **50 ids**; a larger join must be chunked into successive
+calls of up to 50. Exceeding the cap is rejected before any lookup happens, so
+size the batches up front rather than discovering the limit mid-analysis.
 
 **The envelope.**
 `{ flowId, found: [{ actionId, action, taskId, taskName, menuChoice? }], notFound, notes? }`

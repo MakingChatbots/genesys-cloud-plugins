@@ -11,7 +11,7 @@ export interface ToolConfig {
 }
 
 /** Caps the response size; one flow's configuration serves the whole batch. */
-const MAX_ACTION_IDS = 25;
+const MAX_ACTION_IDS = 50;
 
 /**
  * Map each requested id to the action id to look up, tolerating the synthetic
@@ -58,10 +58,11 @@ const inputSchema = {
         .max(MAX_ACTION_IDS)
         .describe(
             "Action GUIDs, taken from the `id` of flow_ir nodes whose `kind` is " +
-                '"action". Batch every action of interest into one call rather than ' +
-                "calling this tool repeatedly. Branch-output ids of the form " +
-                "`<actionId>::<outputId>` are also accepted; the suffix is stripped and " +
-                `the underlying action is returned. Maximum ${MAX_ACTION_IDS} ids.`,
+                '"action". Batch every action of interest into as few calls as possible ' +
+                "rather than calling this tool once per action. Branch-output ids of the " +
+                "form `<actionId>::<outputId>` are also accepted; the suffix is stripped " +
+                `and the underlying action is returned. Maximum ${MAX_ACTION_IDS} ids ` +
+                "per call; chunk a larger set into successive calls.",
         ),
 };
 
