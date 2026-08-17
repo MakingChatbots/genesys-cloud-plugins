@@ -172,6 +172,26 @@ flow's top-level `nluMetaData`, not under any action, so no action lookup can
 reveal it. Intent fan-out stays unresolved, and reachability claims still need
 the qualification described in "Known blind spots".
 
+## Common raw shapes
+
+These are shapes *observed* in returned `action` subtrees, not a contract. The
+raw JSON is not a stable schema (see "The envelope"), so treat the paths below
+as where to look first and verify each against what actually comes back rather
+than assuming it is present. The scoping rule still holds throughout: take the
+condition and the outcome name from the raw action, take where that outcome
+leads from the IR's branch-output node, never from `paths[].nextActionId`.
+
+**`DecisionAction`.** The tested expression lives at `action.expression.text`,
+an Architect boolean expression string. Pair it with the action's Yes and No
+branch-output nodes in the IR for the two destinations; the expression says what
+is tested, the IR says where each answer goes.
+
+**`SwitchAction`.** Case expressions live at `cases[].value.text`. Each case
+joins to its outcome by id: `cases[].referenceId` equals `paths[].outputId`. The
+matching `paths[]` entry supplies the outcome *name*, and the IR branch-output
+node `<actionId>::<outputId>` supplies where that outcome leads. Use
+`paths[].nextActionId` for nothing.
+
 ## Analysis recipes
 
 **Trace "what happens when..."**: walk successors from the entry task-start,
