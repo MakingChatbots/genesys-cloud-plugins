@@ -10,7 +10,7 @@
       "name": "genesys-cloud-architect",
       "source": "./",
       "description": "Create, test, and debug Genesys Cloud Architect flows",
-      "version": "1.0.7"
+      "version": "1.0.8"
     }
   ]
 }

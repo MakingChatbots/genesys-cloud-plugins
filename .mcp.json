@@ -7,7 +7,7 @@
         "GENESYS_REGION": "${user_config.genesys_region}",
         "GENESYS_CLIENT_ID": "${user_config.genesys_client_id}",
         "GENESYS_CLIENT_SECRET":  "${user_config.genesys_client_secret}",
-        "DEPLOY_SCRIPT_PATH": "${CLAUDE_PLUGIN_ROOT}/bin/deploy-runner.js"
+        "DEPLOY_SCRIPT_PATH": "${CLAUDE_PLUGIN_ROOT}/scripts/deploy-runner.js"
       }
     }
   }
