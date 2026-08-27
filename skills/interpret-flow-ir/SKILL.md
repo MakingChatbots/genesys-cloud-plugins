@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: This skill should be used when interpreting the JSON returned by the flow_ir or flow_action tools, or when the user asks questions about a deployed Genesys Cloud Architect flow. Structural questions such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Semantic questions such as "what does this decision check", "what prompt does it play", "what does this data action send", or "what does pressing 2 do". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON, and to fetch the per-action settings the IR omits.
+description: This skill should be used when interpreting the JSON returned by the flow_ir, flow_action or search_in_flow tools, or when the user asks questions about a deployed Genesys Cloud Architect flow. Structural questions such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Semantic questions such as "what does this decision check", "what prompt does it play", "what does this data action send", or "what does pressing 2 do". Search questions such as "find every action that references this queue", "which actions use Flow.DNIS", "where does this flow mention that data action", or "which actions play a prompt containing X". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON, to find the actions worth looking at without fetching them all, and to fetch the per-action settings the IR omits.
 ---
 
 # Interpreting Flow IRs
@@ -11,9 +11,12 @@ Branches, loops, IVR menu choices, and cross-task jumps are already resolved
 into edges. Answer structural questions from this IR, never by re-deriving
 control flow from the flow's raw configuration JSON.
 
-The two tools are a pair: `flow_ir` owns **structure** — what connects to what —
-and `flow_action` owns **semantics** — what an individual action is configured to
-do (see "Action semantics").
+The tools are a trio. `search_in_flow` owns **discovery** — which actions mention a
+given name, expression, or phrase (see "Content search"). `flow_ir` owns
+**structure** — what connects to what. `flow_action` owns **semantics** — what an
+individual action is configured to do (see "Action semantics"). The usual order
+runs the same way: search to find the ids worth caring about, trace to see how
+they connect, then inspect only those.
 
 ## Tool output shape
 
@@ -151,8 +154,12 @@ where that outcome *leads* from the IR's branch-output node, never from
 
 **Branch-output ids.** `<actionId>::<outputId>` is accepted: the suffix is
 stripped, the underlying action is returned, and `notes` flags that it happened.
-Prefer passing plain action GUIDs. `<taskId>::start` is a task marker rather than
-an action, so it can never match.
+Ids in one call that strip to the same GUID collapse to a single lookup,
+reported only under whichever form was requested first — the other requested id
+appears in neither `found` nor `notFound`, so never send both forms of one
+action and never treat the absent form as a missing action. Prefer passing
+plain action GUIDs. `<taskId>::start` is a task marker rather than an action,
+so it can never match.
 
 **`menuChoice`.** Present only when the action sits inside an IVR menu choice.
 Its `digit` and `name` are the choice's *presentation* — the keypress and the
@@ -191,6 +198,77 @@ joins to its outcome by id: `cases[].referenceId` equals `paths[].outputId`. The
 matching `paths[]` entry supplies the outcome *name*, and the IR branch-output
 node `<actionId>::<outputId>` supplies where that outcome leads. Use
 `paths[].nextActionId` for nothing.
+
+## Content search: the `search_in_flow` tool
+
+`search_in_flow` answers "which actions reference X" in **one call**. It matches
+text across every action's raw configuration in a flow and returns only the
+actions containing it, each with the path and a short excerpt of what matched.
+
+**When to reach for it.** Before any bulk `flow_action` sweep. "Which actions use
+the BookSeller module", "what references `Flow.DNIS`", "which queues does this flow
+transfer to", "where is that prompt wording" are each one search, not dozens of
+action fetches — and a sweep pulls back whole subtrees for actions that turn out
+to be irrelevant. Search to find the ids, trace them in `flow_ir`, then fetch
+only the ones that matter with `flow_action`.
+
+**Parameters.** `pattern` is a literal substring unless `regex: true`, in which
+case it is a JavaScript regular expression. `caseSensitive` defaults to false in
+both modes. Prefer a distinctive
+literal (a queue name, a variable reference, a phrase of prompt wording) over a
+regex when either would answer the question.
+
+**The envelope.**
+`{ flowId, pattern, totalMatchedActions, matchedActions: [{ actionId, actionType?, name?, taskId, taskName, menuChoice?, matchedPaths: [{ path, excerpt }], truncated? }], notes? }`
+
+A search matching nothing is a **success**, not an error: `totalMatchedActions:
+0` and an empty `matchedActions`. That is a real answer — the flow does not
+contain the text — so report it rather than retrying variations of the pattern.
+
+**The join.** `actionId` is the Architect GUID, so it is simultaneously the id of
+the `flow_ir` node whose `kind` is `"action"` and an id `flow_action` accepts
+verbatim. `taskId` joins to the IR's `<taskId>::start` node, which is how a
+scatter of hits becomes "these three tasks are involved". An action occurring
+more than once in a flow yields one entry per occurrence — and occurrences can
+share both `actionId` *and* `taskId`, since a duplicate may sit inside a single
+task (one in its action list, one under a menu choice). `menuChoice` and each
+entry's `matchedPaths` are what tell such occurrences apart; group by
+`actionId`, exactly as with `flow_action`.
+
+**Excerpts may be clipped.** A short matched value — up to 160 characters, the
+common case for queue names, variable references, and short expressions — comes
+back **whole**, with no markers: it is safe to quote as that leaf's value
+without re-fetching. A longer value is a window around the match, with `…`
+marking whichever ends were cut, and the response carries a note whenever any
+excerpt was clipped. So the `…` markers are the tell: an unmarked excerpt is the
+complete leaf; a marked one is enough to judge relevance but never enough to
+quote. Either way an excerpt is one leaf, not the action — when the surrounding
+configuration matters, fetch the action with `flow_action` and read `action`
+there.
+
+**Truncation is reported in two places.** `totalMatchedActions` is the count
+before any capping, so it stays accurate even when `matchedActions` is shorter;
+compare the two before asserting "exactly N actions". A per-entry
+`truncated: true` means that action matched in more places than `matchedPaths`
+lists, so a path's absence from that entry proves nothing. `notes`, when present,
+is advisory prose about the search itself — read it, but key no logic off its
+wording.
+
+**What a match does and does not mean.** Matching is against **string values
+only**, never key names, so every hit is real content. But:
+
+- A hit in a wiring field (`nextAction`, `paths[].nextActionId`) locates the text
+  of an id; it is **not** a control-flow claim. The scoping rule from
+  `flow_action` applies unchanged — the IR owns wiring.
+- Content search is not reachability. A match inside a disabled branch, an
+  unreachable action, or a task nothing ever calls is still reported. Before
+  concluding "this flow transfers to queue X", check the matched actions against
+  the IR's `reachable` flag and any `DISABLED_BRANCH` warning.
+- `path` (e.g. `outputs.0.value.text`) is a legible pointer, not a parseable
+  grammar: keys containing dots are not escaped. Use it to say where a match
+  sits, never to reconstruct ids from.
+- A match is text, not structure. `search_in_flow` finding a queue name in six
+  actions says those six mention it, not that six transfers exist.
 
 ## Analysis recipes
 

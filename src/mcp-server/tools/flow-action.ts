@@ -4,6 +4,7 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
+import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
 import type { ToolFactory } from "./types.ts";
 
 export interface ToolConfig {
@@ -87,26 +88,18 @@ export const flowAction: ToolFactory<ToolConfig, typeof inputSchema> = ({
         inputSchema,
     },
     handler: async ({ flowId, actionIds }) => {
-        let configuration: unknown;
-        try {
-            configuration =
-                await architectApi.getFlowLatestconfiguration(flowId);
-        } catch {
+        const fetched = await fetchFlowConfiguration(architectApi, flowId);
+        if (!fetched.ok) {
             return {
                 isError: true,
-                content: [
-                    {
-                        type: "text",
-                        text: `Flow "${flowId}" not found or not accessible.`,
-                    },
-                ],
+                content: [{ type: "text", text: fetched.message }],
             };
         }
 
         const { lookupIds, requestedFor, strippedAny } = planLookups(actionIds);
         // `findRawActions` never throws and always answers for every id, so a
         // batch where nothing matched is still a successful lookup.
-        const lookup = findRawActions(configuration, lookupIds);
+        const lookup = findRawActions(fetched.configuration, lookupIds);
         const asRequested = (entry: RawActionLookup): RawActionLookup => ({
             ...entry,
             actionId: requestedFor.get(entry.actionId) ?? entry.actionId,

@@ -1,6 +1,6 @@
 # Development
 
-Test the plugin locally:
+Test the plugin locally in the Claude Code CLI:
 
 ```shell
 CLAUDE_PLUGIN_ROOT=$(pwd) claude --plugin-dir .
@@ -21,3 +21,7 @@ npx skills add https://github.com/anthropics/claude-plugins-official/tree/main/p
 Claude Code plugin for developing plugins
 
 https://github.com/anthropics/claude-code/tree/main/plugins/plugin-dev
+
+## Claude Desktop
+
+Logs for Claude Desktop can be found: `~/Library/Logs/Claude/claude.ai-web.log`

@@ -6,6 +6,7 @@ import { deployFlow } from "./tools/deploy-flow.ts";
 import { flowAction } from "./tools/flow-action.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
 import { flowIr } from "./tools/flow-ir.ts";
+import { searchInFlow } from "./tools/search-in-flow.ts";
 import { testBotFlow } from "./tools/test-bot-flow.ts";
 
 const envResults = z
@@ -52,6 +53,13 @@ server.registerTool(
     "flow_action",
     flowActionTool.config,
     flowActionTool.handler,
+);
+
+const searchInFlowTool = searchInFlow({ architectApi });
+server.registerTool(
+    "search_in_flow",
+    searchInFlowTool.config,
+    searchInFlowTool.handler,
 );
 
 const deployFlowTool = deployFlow({
