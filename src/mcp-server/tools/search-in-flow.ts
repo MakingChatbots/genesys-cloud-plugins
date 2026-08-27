@@ -4,6 +4,7 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
+import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
 import type { ToolFactory } from "./types.ts";
 
 export interface ToolConfig {
@@ -16,7 +17,6 @@ const MAX_MATCHED_ACTIONS = 100;
 const MAX_PATHS_PER_ACTION = 10;
 /** Excerpt window for matched leaf values; whole short values pass through untouched. */
 const EXCERPT_LENGTH = 160;
-/** Length cap on pattern; also a cheap guard against pathological regexes. */
 const MAX_PATTERN_LENGTH = 512;
 
 type QueryPlan =
@@ -70,6 +70,26 @@ function toExcerpt(
     return `${start > 0 ? "…" : ""}${value.slice(start, end)}${
         end < value.length ? "…" : ""
     }`;
+}
+
+/**
+ * `searchRawActions` answers `{ hasMatches: false }` both for a genuine
+ * zero-match search and for input it cannot traverse at all, so untraversable
+ * configurations are refused before searching — flattening them into a
+ * successful 0 would read as "the flow never references X" when nothing was
+ * actually searched. Mirrors the shape test the library's own `sequenceItems`
+ * applies before walking.
+ */
+function isSearchable(configuration: unknown): boolean {
+    return (
+        typeof configuration === "object" &&
+        configuration !== null &&
+        !Array.isArray(configuration) &&
+        Array.isArray(
+            (configuration as { flowSequenceItemList?: unknown })
+                .flowSequenceItemList,
+        )
+    );
 }
 
 const inputSchema = {
@@ -132,24 +152,34 @@ export const searchInFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             };
         }
 
-        let configuration: unknown;
-        try {
-            configuration =
-                await architectApi.getFlowLatestconfiguration(flowId);
-        } catch {
+        const fetched = await fetchFlowConfiguration(architectApi, flowId);
+        if (!fetched.ok) {
+            return {
+                isError: true,
+                content: [{ type: "text", text: fetched.message }],
+            };
+        }
+        const configuration = fetched.configuration;
+
+        if (!isSearchable(configuration)) {
             return {
                 isError: true,
                 content: [
                     {
                         type: "text",
-                        text: `Flow "${flowId}" not found or not accessible.`,
+                        text:
+                            `The latest configuration of flow "${flowId}" has no ` +
+                            "flowSequenceItemList to search — the flow type may be " +
+                            "unsupported. Nothing was searched, so this is not a " +
+                            "zero-match result.",
                     },
                 ],
             };
         }
 
-        // `searchRawActions` never throws and always answers, so a flow where
-        // nothing matched is a successful search rather than an error.
+        // `searchRawActions` never throws and always answers, and untraversable
+        // input was refused above, so a flow where nothing matched is a genuine
+        // zero-match search rather than an error.
         const result = searchRawActions(configuration, plan.query, {
             caseSensitive,
             maxMatchesPerAction: MAX_PATHS_PER_ACTION,

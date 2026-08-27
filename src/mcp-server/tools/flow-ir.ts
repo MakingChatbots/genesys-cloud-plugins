@@ -4,6 +4,7 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
+import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
 import type { ToolFactory } from "./types.ts";
 
 /**
@@ -64,23 +65,15 @@ export const flowIr: ToolFactory<ToolConfig, typeof inputSchema> = ({
         inputSchema,
     },
     handler: async ({ flowId, task }) => {
-        let configuration: unknown;
-        try {
-            configuration =
-                await architectApi.getFlowLatestconfiguration(flowId);
-        } catch {
+        const fetched = await fetchFlowConfiguration(architectApi, flowId);
+        if (!fetched.ok) {
             return {
                 isError: true,
-                content: [
-                    {
-                        type: "text",
-                        text: `Flow "${flowId}" not found or not accessible.`,
-                    },
-                ],
+                content: [{ type: "text", text: fetched.message }],
             };
         }
 
-        const result = parseFlow(configuration);
+        const result = parseFlow(fetched.configuration);
 
         if (!result.ok) {
             return {

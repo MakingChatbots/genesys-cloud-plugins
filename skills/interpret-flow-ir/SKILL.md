@@ -210,8 +210,9 @@ only the ones that matter with `flow_action`.
 
 **Parameters.** `pattern` is a literal substring unless `regex: true`, in which
 case it is a JavaScript regular expression. `caseSensitive` defaults to false in
-both modes. An invalid regular expression is rejected before the flow is
-fetched, so a bad pattern costs nothing to correct.
+both modes. Prefer a distinctive
+literal (a queue name, a variable reference, a phrase of prompt wording) over a
+regex when either would answer the question.
 
 **The envelope.**
 `{ flowId, pattern, totalMatchedActions, matchedActions: [{ actionId, actionType?, name?, taskId, taskName, menuChoice?, matchedPaths: [{ path, excerpt }], truncated? }], notes? }`
@@ -224,14 +225,22 @@ contain the text — so report it rather than retrying variations of the pattern
 the `flow_ir` node whose `kind` is `"action"` and an id `flow_action` accepts
 verbatim. `taskId` joins to the IR's `<taskId>::start` node, which is how a
 scatter of hits becomes "these three tasks are involved". An action occurring
-more than once in a flow yields one entry per occurrence, told apart by `taskId`;
-group by `actionId`, exactly as with `flow_action`.
+more than once in a flow yields one entry per occurrence — and occurrences can
+share both `actionId` *and* `taskId`, since a duplicate may sit inside a single
+task (one in its action list, one under a menu choice). `menuChoice` and each
+entry's `matchedPaths` are what tell such occurrences apart; group by
+`actionId`, exactly as with `flow_action`.
 
-**Excerpts are clipped.** `excerpt` is a window around the match with `…`
-markers, not the whole value — a long expression or prompt is cut on both sides.
-It is enough to judge whether an action is relevant; it is never enough to quote
-as that action's configuration. When the full text matters, fetch the action with
-`flow_action` and read `action` there.
+**Excerpts may be clipped.** A short matched value — up to 160 characters, the
+common case for queue names, variable references, and short expressions — comes
+back **whole**, with no markers: it is safe to quote as that leaf's value
+without re-fetching. A longer value is a window around the match, with `…`
+marking whichever ends were cut, and the response carries a note whenever any
+excerpt was clipped. So the `…` markers are the tell: an unmarked excerpt is the
+complete leaf; a marked one is enough to judge relevance but never enough to
+quote. Either way an excerpt is one leaf, not the action — when the surrounding
+configuration matters, fetch the action with `flow_action` and read `action`
+there.
 
 **Truncation is reported in two places.** `totalMatchedActions` is the count
 before any capping, so it stays accurate even when `matchedActions` is shorter;
