@@ -154,8 +154,12 @@ where that outcome *leads* from the IR's branch-output node, never from
 
 **Branch-output ids.** `<actionId>::<outputId>` is accepted: the suffix is
 stripped, the underlying action is returned, and `notes` flags that it happened.
-Prefer passing plain action GUIDs. `<taskId>::start` is a task marker rather than
-an action, so it can never match.
+Ids in one call that strip to the same GUID collapse to a single lookup,
+reported only under whichever form was requested first — the other requested id
+appears in neither `found` nor `notFound`, so never send both forms of one
+action and never treat the absent form as a missing action. Prefer passing
+plain action GUIDs. `<taskId>::start` is a task marker rather than an action,
+so it can never match.
 
 **`menuChoice`.** Present only when the action sits inside an IVR menu choice.
 Its `digit` and `name` are the choice's *presentation* — the keypress and the
