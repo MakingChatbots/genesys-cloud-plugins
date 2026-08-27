@@ -1,2 +1,2 @@
 servers/genesys-cloud-architect-mcp.js linguist-generated=true generated-code
-bin/deploy-runner.js linguist-generated=true generated-code
+scripts/deploy-runner.js linguist-generated=true generated-code

@@ -2,4 +2,4 @@ pnpm biome check --write --staged --no-errors-on-unmatched
 pnpm typecheck
 pnpm build
 git add servers/genesys-cloud-architect-mcp.js
-git add bin/deploy-runner.js
+git add scripts/deploy-runner.js

@@ -28,7 +28,7 @@ jobs:
       - run: pnpm run build
       - name: Verify committed bundles match source
         run: |
-          git diff --stat --exit-code servers/ bin/ || {
+          git diff --stat --exit-code servers/ scripts/ || {
             echo "::error::Committed bundles are out of sync with source. Run 'pnpm run build' and commit the result."
             exit 1
           }
