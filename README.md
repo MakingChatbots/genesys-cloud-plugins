@@ -1,8 +1,12 @@
 # Claude Code Plugin: Genesys Cloud Architect
 
-[![Follow me on LinkedIn for updates](https://img.shields.io/badge/Follow%20for%20updates-LinkedIn-blue)](https://www.linkedin.com/in/lucas-woodward-the-dev/)
+<p align="center">
+  <img src="docs/assets/logo.png" width="250">
+</p>
 
-Claude Code plugin for anyone working with Genesys Cloud's Architect flows that want to:
+Use Claude Code to create, test, diagnose and document your Genesys Cloud's Architect flows.
+
+This plugin allows you to:
 
 * [Create architect flows of any type](#create-architect-flows-of-any-type)
 * [Run automated tests against Digital flows](#run-automated-tests-against-digital-flows)
