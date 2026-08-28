@@ -97,7 +97,7 @@ TODO Add example
 
 ## Who built this?
 
-This was built by me, ([Lucas Woodward](https://makingchatbots.com/about#§who-am-i)).
+This is built by [Lucas Woodward](https://makingchatbots.com/about#§who-am-i).
 
 I've been building this in public - engaging with the Genesys community with each milestone. If you'd like to keep up
 to date with releases then [follow me on LinkedIn](https://www.linkedin.com/in/lucas-woodward-the-dev/).
