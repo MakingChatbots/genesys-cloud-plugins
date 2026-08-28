@@ -4,8 +4,8 @@
 
 Claude Code plugin for anyone working with Genesys Cloud's Architect flows that want to:
 
-* [Create architect flows of any type](#create-flows)
-* [Run automated tests against Digital flows](#test-flows)
+* [Create architect flows of any type](#create-architect-flows-of-any-type)
+* [Run automated tests against Digital flows](#run-automated-tests-against-digital-flows)
 * [Create and test flow expressions](#create-and-test-flow-expressions)
 * [Inspect and fix issues in flows](#inspect-and-fix-issues-in-flows)
 * [Document flows](#document-flows)
@@ -13,9 +13,15 @@ Claude Code plugin for anyone working with Genesys Cloud's Architect flows that 
 
 ## Getting started
 
-Follow the [installation guide](#installation), then tell Claude Code what you want to do:
+Follow the [installation guide](#installation), then simply tell Claude Code what you want it to do.
 
-### Create flows
+Below are examples of each of its capabilities:
+
+### Create architect flows of any type
+
+Asking Claude Code to create a flow will have it create, publish and test a flow using the [Architect Scripting SDK](https://mypurecloud.github.io/purecloud-flow-scripting-api-sdk-javascript/).
+
+Below is an example of a simple flow, but they can be much more complex:
 
 > Create a Bank bot flow with two intents: "Check Account Balance" (collects an 8-digit AccountNumber slot) and "Find a Branch" (collects a 5-digit ZipCode slot).
 >
@@ -30,28 +36,43 @@ Follow the [installation guide](#installation), then tell Claude Code what you w
 > 
 > Publish the flow, and test it frequently as you build it.
 
-[Example of a flow being created](https://makingchatbots.com/i/200764669/create-your-flows-with-ai).
+Resulting in a flow:
 
-### Test flows
+<img src="docs/assets/flow.png" width="500">
+
+[Read more...](https://makingchatbots.com/i/200764669/create-your-flows-with-ai)
+
+### Run automated tests against Digital flows
+
+The plugin allows Claude Code to run tests against Digital bot flows. This is useful when
+it's developing flows, or simply to test for edge-cases in existing flows:
+
+> Inspect the 'Bank bot' flow and run tests against it to ensure it behaves as expected.
+
+<img src="docs/assets/running-tests.png" width="500">
 
 ### Create and test flow expressions
 
-```
-My Genesys Architect flow needs to extract the 'author' from the JSON retrieved from a participant attribute below:
+> My Genesys Architect flow needs to extract the 'author' from the JSON retrieved from a participant attribute below:
+>
+> { "newsletter": {"makingchatbots": {"author": "Lucas Woodward "}}
+>
+> Create an expression that returns the value of 'author'. However, if the property (or any of the parent properties) do not exist then return an empty value.
+>
+> Create a Digital Bot flow to test your expression against different test cases.
 
-{ "newsletter": {"makingchatbots": {"author": "Lucas Woodward "}}
-
-Create an expression that returns the value of 'author'. However, if the property (or any of the parent properties) do not exist then return an empty value.
-
-Create a Digital Bot flow to test your expression against different test cases.
-```
 
 <img src="docs/assets/expression-result.png" width="500">
 
+[Read more...](https://makingchatbots.com/i/200764669/create-and-test-expressions)
+
 ### Inspect and fix issues in flows
+
+TODO Add example
 
 ### Document flows
 
+TODO Add example
 
 ## Installation
 
@@ -76,14 +97,12 @@ Create a Digital Bot flow to test your expression against different test cases.
 
 ## Who built this?
 
-This was built by me, [Lucas Woodward]([https://www.linkedin.com/in/lucas-woodward-the-dev/](https://makingchatbots.com/about#§who-am-i)).
+This was built by me, ([Lucas Woodward](https://makingchatbots.com/about#§who-am-i)).
 
-I've been building this in public - engaging with the Genesys community with each milestone.
-[Follow me on LinkedIn to join in](https://www.linkedin.com/in/lucas-woodward-the-dev/).
+I've been building this in public - engaging with the Genesys community with each milestone. If you'd like to keep up
+to date with releases then [follow me on LinkedIn](https://www.linkedin.com/in/lucas-woodward-the-dev/).
 
-![LinkedIn posts about this plugin](docs/assets/linkedin-posts.png)
-
-What else have I built:
+What else I have built:
 
 * [Genesys Cloud MCP Server](https://github.com/MakingChatbots/genesys-cloud-mcp-server)
 * [Genesys Cloud n8n community node](https://github.com/MakingChatbots/n8n-nodes-genesys-cloud)
