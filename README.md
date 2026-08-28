@@ -17,15 +17,36 @@ Follow the [installation guide](#installation), then tell Claude Code what you w
 
 ### Create flows
 
-> Create a Digital Bot flow to do X, and run numerous tests to catch any edge-cases...
-
-> Create an inbound call flow that routes callers to queues by DNIS...
+> Create a Bank bot flow with two intents: "Check Account Balance" (collects an 8-digit AccountNumber slot) and "Find a Branch" (collects a 5-digit ZipCode slot).
+>
+> The bot:
+> 1. Asks "What would you like to do?"
+> 2. Detects the intent
+> 3. Then asks for the relevant slot
+> 4. Exit the bot flow after slot collection
+> 
+> Include 6 utterances per intent with entity-annotated examples.
+> Add intent confirmation prompts like "I think you want to [intent], is that correct?"
+> 
+> Publish the flow, and test it frequently as you build it.
 
 [Example of a flow being created](https://makingchatbots.com/i/200764669/create-your-flows-with-ai).
 
 ### Test flows
 
 ### Create and test flow expressions
+
+```
+My Genesys Architect flow needs to extract the 'author' from the JSON retrieved from a participant attribute below:
+
+{ "newsletter": {"makingchatbots": {"author": "Lucas Woodward "}}
+
+Create an expression that returns the value of 'author'. However, if the property (or any of the parent properties) do not exist then return an empty value.
+
+Create a Digital Bot flow to test your expression against different test cases.
+```
+
+<img src="docs/assets/expression-result.png" width="500">
 
 ### Inspect and fix issues in flows
 
