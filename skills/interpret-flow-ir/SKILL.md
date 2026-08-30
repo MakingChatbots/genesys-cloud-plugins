@@ -20,8 +20,7 @@ they connect, then inspect only those.
 
 All three take a flow id, not a flow name. When only the name is known (e.g.
 "analyse Book_Payment"), resolve it first with `find_flow`, which searches flow
-names and descriptions and returns each match's id, name, type, and published
-version.
+names and returns each match's id, name, type, and published version.
 
 ## Tool output shape
 

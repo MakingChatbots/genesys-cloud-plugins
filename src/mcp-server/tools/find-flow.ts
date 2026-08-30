@@ -35,12 +35,20 @@ function moveExactMatchToTop(
     flows: platformClient.Models.Flow[],
     name: string,
 ): platformClient.Models.Flow[] {
-    const lowerName = name.toLowerCase();
-    const isExact = (flow: platformClient.Models.Flow) =>
-        flow.name.toLowerCase() === lowerName;
     return flows
         .slice()
-        .sort((a, b) => Number(isExact(b)) - Number(isExact(a)));
+        .sort(
+            (a, b) =>
+                Number(isExactNameMatch(b, name)) -
+                Number(isExactNameMatch(a, name)),
+        );
+}
+
+function isExactNameMatch(
+    flow: platformClient.Models.Flow,
+    name: string,
+): boolean {
+    return flow.name.toLowerCase() === name.toLowerCase();
 }
 
 function toFlowSummary(flow: platformClient.Models.Flow): FlowSummary {
@@ -115,12 +123,17 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 });
 
                 if (page.entities) flows.push(...page.entities);
-                total = page.total ?? flows.length;
+                // A page may omit the optional total; keep the last value a
+                // page reported rather than clobbering it.
+                total = page.total ?? total;
 
                 if (!page.nextUri || flows.length >= MAX_FETCHED_FLOWS) break;
 
                 pageNumber++;
             }
+            // If no page reported a total (or it undercounts what was
+            // actually fetched), the fetched count is the better floor.
+            total = Math.max(total, flows.length);
 
             const returned = moveExactMatchToTop(flows, name).slice(
                 0,
@@ -134,14 +147,23 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
                         "a portion of the name, so try a shorter fragment, " +
                         "or drop the type filter if one was given.",
                 );
-            }
-
-            if (total > returned.length) {
-                notes.push(
-                    `${total} flows matched; only ${returned.length} are ` +
-                        "returned, exact name matches first. Use a longer " +
-                        "fragment of the name to narrow the search.",
-                );
+            } else if (total > returned.length) {
+                // Only claim exact-first ordering when an exact match was
+                // actually fetched; moveExactMatchToTop puts it at index 0.
+                let note = `${total} flows matched; only ${returned.length} are returned${
+                    isExactNameMatch(returned[0], name)
+                        ? ", exact name matches first"
+                        : ""
+                }.`;
+                if (flows.length < total) {
+                    note +=
+                        ` Only the first ${flows.length} matches were ` +
+                        `fetched, so a flow named exactly "${name}" beyond ` +
+                        "those would be missing.";
+                }
+                note +=
+                    " Use a longer fragment of the name to narrow the search.";
+                notes.push(note);
             }
 
             const result: FindFlowResult = {
