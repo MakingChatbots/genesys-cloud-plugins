@@ -5,8 +5,8 @@ import type { ToolFactory } from "./types.ts";
 
 const MAX_RETURNED_FLOWS = 50;
 /**
- * Caps how many flows are fetched before ranking; exact-name ranking can only
- * consider fetched flows, so a match beyond this many API results is missed.
+ * Caps the API pages fetched; moveExactMatchToTop only sees fetched flows, so
+ * an exactly-named flow beyond this many API results is missed.
  */
 const MAX_FETCHED_FLOWS = 200;
 
@@ -23,6 +23,24 @@ interface FindFlowResult {
     flows: FlowSummary[];
     total: number;
     notes?: string[];
+}
+
+/**
+ * Returned flows are capped, so without this an exactly-named flow past the
+ * cap would be silently dropped from a broad query's response. Relies on
+ * Array.prototype.sort being stable (guaranteed since ES2019) to keep API
+ * order for the rest.
+ */
+function moveExactMatchToTop(
+    flows: platformClient.Models.Flow[],
+    name: string,
+): platformClient.Models.Flow[] {
+    const lowerName = name.toLowerCase();
+    const isExact = (flow: platformClient.Models.Flow) =>
+        flow.name.toLowerCase() === lowerName;
+    return flows
+        .slice()
+        .sort((a, b) => Number(isExact(b)) - Number(isExact(a)));
 }
 
 function toFlowSummary(flow: platformClient.Models.Flow): FlowSummary {
@@ -104,19 +122,10 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 pageNumber++;
             }
 
-            const lowerName = name.toLowerCase();
-            const ranked = flows
-                .map((flow, index) => ({ flow, index }))
-                .sort((a, b) => {
-                    const aExact =
-                        a.flow.name.toLowerCase() === lowerName ? 0 : 1;
-                    const bExact =
-                        b.flow.name.toLowerCase() === lowerName ? 0 : 1;
-                    return aExact - bExact || a.index - b.index;
-                })
-                .map(({ flow }) => flow);
-
-            const returned = ranked.slice(0, MAX_RETURNED_FLOWS);
+            const returned = moveExactMatchToTop(flows, name).slice(
+                0,
+                MAX_RETURNED_FLOWS,
+            );
 
             const notes: string[] = [];
             if (returned.length === 0) {
