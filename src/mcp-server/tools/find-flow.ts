@@ -25,10 +25,6 @@ interface FindFlowResult {
     notes?: string[];
 }
 
-function toWildcardQuery(name: string): string {
-    return name.includes("*") ? name : `*${name}*`;
-}
-
 function toFlowSummary(flow: platformClient.Models.Flow): FlowSummary {
     return {
         id: flow.id ?? "",
@@ -50,11 +46,9 @@ const inputSchema = {
         .string()
         .min(1)
         .describe(
-            "The flow name, or a fragment of it, to search for. Matched " +
-                "case-insensitively against flow names and descriptions as a " +
-                "substring, so a partial name like 'payment' finds " +
-                "'Book_Payment'. A `*` in the query is treated as a wildcard " +
-                "and disables the automatic substring wrapping.",
+            "The flow name, or a portion of it, to search for. Matched " +
+                "case-insensitively against flow names, so a partial name " +
+                "like 'payment' finds 'Book_Payment'.",
         ),
     type: z
         .array(z.string())
@@ -75,8 +69,8 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             "human-readable name users know (e.g. 'Book_Payment') to the flow " +
             "id every other flow tool requires. Returns each matching flow's " +
             "id, name, type and published version. Matching is a " +
-            "case-insensitive substring search over flow names and " +
-            "descriptions; flows whose name equals the query exactly are " +
+            "case-insensitive search over flow names that accepts a portion " +
+            "of the name; flows whose name equals the query exactly are " +
             "listed first. The returned id is accepted verbatim by flow_ir, " +
             "flow_action, search_in_flow and flow_dependencies. A " +
             "publishedVersion of null means the flow has never been " +
@@ -96,10 +90,10 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             let pageNumber = 1;
             while (true) {
                 const page = await architectApi.getFlows({
-                    nameOrDescription: toWildcardQuery(name),
+                    name,
                     pageSize: 100,
                     pageNumber,
-                    ...(type && type.length > 0 ? { type } : {}),
+                    ...(type?.length ? { type } : {}),
                 });
 
                 if (page.entities) flows.push(...page.entities);
@@ -127,10 +121,9 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             const notes: string[] = [];
             if (returned.length === 0) {
                 notes.push(
-                    `No flows matched "${name}". The search already covers ` +
-                        "substrings of names and descriptions, so try a " +
-                        "shorter fragment of the name, or drop the type " +
-                        "filter if one was given.",
+                    `No flows matched "${name}". The search already accepts ` +
+                        "a portion of the name, so try a shorter fragment, " +
+                        "or drop the type filter if one was given.",
                 );
             }
 
