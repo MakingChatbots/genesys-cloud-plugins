@@ -5,5 +5,4 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - purecloud-flow-scripting-api-sdk-javascript@0.68.3
-  - '@makingchatbots/genesys-cloud-architect-diagram-lib@1.3.5'
-  - '@makingchatbots/genesys-cloud-architect-diagram-lib@1.4.0'
+  - '@makingchatbots/genesys-cloud-architect-diagram-lib'
