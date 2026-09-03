@@ -35,7 +35,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
-    "@makingchatbots/genesys-cloud-architect-diagram-lib": "^1.4.0",
+    "@makingchatbots/genesys-cloud-architect-diagram-lib": "^1.5.0",
     "@types/node": "^25.8.0",
     "esbuild": "^0.28.2",
     "husky": "^9.1.7",
