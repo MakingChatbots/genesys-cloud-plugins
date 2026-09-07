@@ -1,6 +1,7 @@
 import type platformClient from "purecloud-platform-client-v2";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
+import { formatApiError } from "./api-error.ts";
 import type { ToolFactory } from "./types.ts";
 
 function flowTypeToObjectType(flowType: string): string {
@@ -112,7 +113,7 @@ export const flowDependencies: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 content: [
                     {
                         type: "text",
-                        text: `Failed to retrieve flow dependencies: ${err instanceof Error ? err.message : String(err)}`,
+                        text: `Failed to retrieve flow dependencies: ${formatApiError(err)}`,
                     },
                 ],
             };

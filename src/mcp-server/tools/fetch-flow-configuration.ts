@@ -1,4 +1,5 @@
 import type { ArchitectApi } from "purecloud-platform-client-v2";
+import { toApiError } from "./api-error.ts";
 
 export type FetchFlowConfigurationResult =
     | { ok: true; configuration: unknown }
@@ -20,21 +21,7 @@ export async function fetchFlowConfiguration(
 }
 
 function describeFailure(flowId: string, err: unknown): string {
-    const status =
-        err !== null &&
-        typeof err === "object" &&
-        "status" in err &&
-        typeof err.status === "number"
-            ? err.status
-            : undefined;
-    const detail =
-        err !== null &&
-        typeof err === "object" &&
-        "message" in err &&
-        typeof err.message === "string" &&
-        err.message.length > 0
-            ? err.message
-            : undefined;
+    const { status, message: detail } = toApiError(err);
 
     if (status === 404) {
         return `Flow "${flowId}" not found. Check the flow id.`;

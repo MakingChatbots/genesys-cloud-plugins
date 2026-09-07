@@ -45,7 +45,7 @@ Ask the user:
 - **What it should do**: routing, menus, greetings, queue transfers, data lookups, etc.
 - **Flow name**: what to name the flow in Architect
 
-Only ask about queue names if the user's description involves queue transfers. Not every flow routes to a queue.
+Only ask about queue names if the user's description involves queue transfers. Not every flow routes to a queue. When the user does name a queue, confirm it exists with the `find_queue` MCP tool before writing the flow, and use the exact queue name it returns in the transfer action.
 
 ### 2. Read the relevant references
 

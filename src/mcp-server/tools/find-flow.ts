@@ -1,6 +1,8 @@
 import type platformClient from "purecloud-platform-client-v2";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
+import { formatApiError } from "./api-error.ts";
+import { isExactNameMatch, moveExactMatchToTop } from "./name-match.ts";
 import type { ToolFactory } from "./types.ts";
 
 const MAX_RETURNED_FLOWS = 50;
@@ -23,32 +25,6 @@ interface FindFlowResult {
     flows: FlowSummary[];
     total: number;
     notes?: string[];
-}
-
-/**
- * Returned flows are capped, so without this an exactly-named flow past the
- * cap would be silently dropped from a broad query's response. Relies on
- * Array.prototype.sort being stable (guaranteed since ES2019) to keep API
- * order for the rest.
- */
-function moveExactMatchToTop(
-    flows: platformClient.Models.Flow[],
-    name: string,
-): platformClient.Models.Flow[] {
-    return flows
-        .slice()
-        .sort(
-            (a, b) =>
-                Number(isExactNameMatch(b, name)) -
-                Number(isExactNameMatch(a, name)),
-        );
-}
-
-function isExactNameMatch(
-    flow: platformClient.Models.Flow,
-    name: string,
-): boolean {
-    return flow.name.toLowerCase() === name.toLowerCase();
 }
 
 function toFlowSummary(flow: platformClient.Models.Flow): FlowSummary {
@@ -181,7 +157,7 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 content: [
                     {
                         type: "text",
-                        text: `Failed to search for flows: ${err instanceof Error ? err.message : String(err)}`,
+                        text: `Failed to search for flows: ${formatApiError(err)}`,
                     },
                 ],
             };
