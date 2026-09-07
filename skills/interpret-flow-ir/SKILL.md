@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: This skill should be used when interpreting the JSON returned by the flow_ir, flow_action or search_in_flow tools, or when the user asks questions about a deployed Genesys Cloud Architect flow, including one they name only by its flow name (resolve it with find_flow first). Structural questions such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Semantic questions such as "what does this decision check", "what prompt does it play", "what does this data action send", or "what does pressing 2 do". Search questions such as "find every action that references this queue", "which actions use Flow.DNIS", "where does this flow mention that data action", or "which actions play a prompt containing X". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON, to find the actions worth looking at without fetching them all, and to fetch the per-action settings the IR omits.
+description: This skill should be used when interpreting the JSON returned by the flow_ir, flow_action or search_in_flow tools, or when the user asks questions about a deployed Genesys Cloud Architect flow, including one they name only by its flow name (resolve it with find_flow first) or a queue they name only by its queue name (resolve it with find_queue first). Structural questions such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Semantic questions such as "what does this decision check", "what prompt does it play", "what does this data action send", or "what does pressing 2 do". Search questions such as "find every action that references this queue", "which actions use Flow.DNIS", "where does this flow mention that data action", or "which actions play a prompt containing X". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON, to find the actions worth looking at without fetching them all, and to fetch the per-action settings the IR omits.
 ---
 
 # Interpreting Flow IRs
@@ -21,6 +21,12 @@ they connect, then inspect only those.
 All three take a flow id, not a flow name. When only the name is known (e.g.
 "analyse Book_Payment"), resolve it first with `find_flow`, which searches flow
 names and returns each match's id, name, type, and published version.
+
+Likewise, when the user names a *queue* (e.g. "which actions transfer to Sales"),
+resolve it first with `find_queue`, which searches queue names and returns each
+match's id, exact name, division and in-queue flows. Give `search_in_flow` the
+exact name it returns, since a fragment the user typed may not be how the queue is
+spelled in the flow.
 
 ## Tool output shape
 

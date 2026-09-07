@@ -4,6 +4,7 @@ import platformClient from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
 import { deployFlow } from "./tools/deploy-flow.ts";
 import { findFlow } from "./tools/find-flow.ts";
+import { findQueue } from "./tools/find-queue.ts";
 import { flowAction } from "./tools/flow-action.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
 import { flowIr } from "./tools/flow-ir.ts";
@@ -38,9 +39,13 @@ const server = new McpServer({
 });
 
 const architectApi = new platformClient.ArchitectApi();
+const routingApi = new platformClient.RoutingApi();
 
 const findFlowTool = findFlow({ architectApi });
 server.registerTool("find_flow", findFlowTool.config, findFlowTool.handler);
+
+const findQueueTool = findQueue({ routingApi });
+server.registerTool("find_queue", findQueueTool.config, findQueueTool.handler);
 
 const flowDependenciesTool = flowDependencies({ architectApi });
 server.registerTool(
