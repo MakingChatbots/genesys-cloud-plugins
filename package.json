@@ -28,15 +28,15 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "purecloud-flow-scripting-api-sdk-javascript": "^0.68.3",
-    "purecloud-platform-client-v2": "^258.2.0",
-    "zod": "^4.0.0"
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "purecloud-flow-scripting-api-sdk-javascript": "^0.69.1",
+    "purecloud-platform-client-v2": "^263.2.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.7",
-    "@makingchatbots/genesys-cloud-architect-diagram-lib": "^1.5.0",
-    "@types/node": "^25.8.0",
+    "@biomejs/biome": "2.5.15",
+    "@makingchatbots/genesys-cloud-architect-diagram-lib": "^1.6.0",
+    "@types/node": "^26.6.3",
     "esbuild": "^0.28.2",
     "husky": "^9.1.7",
     "typescript": "^7.0.2"
