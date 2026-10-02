@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: This skill should be used when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution or flow_execution_data tools, or when the user asks questions about a deployed Genesys Cloud Architect flow, including one they name only by its flow name (resolve it with find_flow first). Structural questions such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Semantic questions such as "what does this decision check", "what prompt does it play", "what does this data action send", or "what does pressing 2 do". Search questions such as "find every action that references this queue", "which actions use Flow.DNIS", "where does this flow mention that data action", or "which actions play a prompt containing X". Execution questions such as "what did this conversation do in the flow", "why did the customer loop", "which path did the call take", "did the flow error for conversation X", "is this flow working in production", or "show me how my test run went through the flow". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON, to find the actions worth looking at without fetching them all, to fetch the per-action settings the IR omits, and to read one run's execution data against the IR.
+description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution or flow_execution_data tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), and execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
 ---
 
 # Interpreting Flow IRs
@@ -301,7 +301,20 @@ Prefer `conversationId` when searching: the API indexes on it, cannot filter by
 date, caps results at 200, and only keeps 10 days. A run is listed only once it
 has **ended**; one still waiting for input is not yet there. `onlyWithErrors` is
 applied to the fetched instances, since the API's query operators have no
-negation or null test.
+negation or null test. So on a busy flow the filter sees only the 200 instances
+the API returned: errored runs older than that are invisible, and an empty
+result means "none among the fetched", not "none at all".
+
+**`find_flow_execution`'s envelope.**
+`{ query, executions: [{ executionId, flowId, flowName, flowType, flowVersion,
+conversationId, workitemId?, startDateTime, endDateTime, flowErrorReason?,
+flowWarningReason? }], total, notes? }`. `executions` is the list to iterate;
+`flowErrorReason` and `flowWarningReason` are present only when set (the API's
+`NONE` is normalised to absence). `total` is the API's count **before** the
+200 cap and before `onlyWithErrors` is applied, so it routinely exceeds
+`executions.length`; compare the two before asserting "exactly N runs", as
+with `totalMatchedActions` in search. `notes`, when present, explains an empty
+or capped result.
 
 **`test_bot_flow` runs are instances too.** The `sessionId` it returns *is* the
 `executionId`; pass it straight to `flow_execution_data` to see exactly how a
@@ -314,6 +327,13 @@ Such runs have a null conversation id, so find them by `flowId` rather than
 `{ executionId, flowId, flowName, flowType, flowVersion, conversationId,
 startDateTime, endDateTime, durationMs, flowExitReason, logLevel, executionInfo,
 isTruncated, isSecure, flowIsDebug, division, summary, events, ir?, notes? }`
+
+Only `executionId`, `conversationId`, `durationMs`, `flowExitReason`,
+`logLevel`, `summary`, `events`, `ir` and `notes` are the tool's own fields.
+The rest (`flowId` through `division`, and anything else that appears) are the
+instance's top-level Genesys fields passed through untouched: observed, not a
+contract, like the raw `action` subtree in `flow_action`. Read them
+defensively.
 
 - `summary.eventKinds` counts events per kind; `summary.repeatedActions` lists
   actions executed more than once with the `index` of each occurrence. **A
@@ -368,6 +388,13 @@ back to the latest), `unmatchedActionIds`, `unmatchedStateIds`,
 *negative space*: the branches not taken. It is not dead logic; one run proves
 nothing about other runs.
 
+A non-empty `unmatchedActionIds` has two causes, told apart by `configuration`.
+If the join fell back to `{ latest: true }`, the flow has probably been
+redeployed since the run and the executed action no longer exists. If the join
+used the exact `flowVersion` that ran, the action lives in a called common
+module or bot flow, whose actions the parent flow's IR never contains. Do not
+report a redeploy without checking which.
+
 Three naming traps:
 
 - Event kinds and IR types differ by convention: **`action<Type>` ↔
@@ -401,8 +428,12 @@ Three naming traps:
   a Loop's `__LOOP__`) and usually `outputPathName`. That id is exactly the
   suffix of the IR branch-output node, so `ir.takenBranch` gives
   `{ nodeId: "<actionId>::<outputPathId>", label, inIr }`: the branch that ran,
-  by its IR label. The sibling branch-outputs in `successors` are the roads not
-  taken on this run. A Decision also records `inputData.condition` (the
+  by its IR label. `inIr: false` means the IR has no branch-output for that
+  path: the run took an outcome the graph does not model, most often a
+  `DigitalMenuAction` choice (see "Known blind spots"). The `outputPathName`
+  is then the only label available. The sibling branch-outputs in `successors`
+  are the roads not taken on this run. A Decision also records
+  `inputData.condition` (the
   evaluated boolean); a Switch records `inputData.value` and the matching
   `inputData.cases[]`; an intent ask records `inputData.enabledIntents[]` and
   the matched intent in `outputVariables[]` as `Session.ActiveIntent`; a slot
@@ -461,7 +492,9 @@ read the condition.
 **"Did the flow error?"** `find_flow_execution` with `onlyWithErrors: true`
 (by `flowId` to sweep recent runs, or with the `conversationId`). The
 `flowErrorReason` names the failure; in the instance, the `eventError` event's
-`relatedAction` and `context.reason` say which action failed and why.
+`relatedAction` and `context.reason` say which action failed and why. A sweep
+by `flowId` covers only the most recent 200 instances, so "no errors" from it
+means none among those; say so rather than clearing the flow outright.
 
 **"Is the flow working?"** Run `test_bot_flow` and pass its `sessionId` to
 `flow_execution_data`, or sample recent instances by `flowId`. Confirm the
@@ -490,7 +523,10 @@ design.)
 `reachable: false` nodes (grouped by `taskName`) are provably orphaned actions
 no task entry point can reach. When `false`, they are merely not provably
 reachable, since the unmodelled intent routing may reach them; report them as
-"unverifiable", not dead.
+"unverifiable", not dead. Execution data settles it the other way: an action
+that appears in any run's `events` was reached, whatever its `reachable` flag
+says. An executed node marked `reachable: false` exposes a modelling gap in
+the IR, not a flow defect.
 
 **Orphaned tasks**: `reachable` does NOT mean "reachable from the flow entry".
 Every task-start is a traversal root, so a task nothing ever calls still shows
