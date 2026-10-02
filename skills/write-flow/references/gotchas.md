@@ -66,6 +66,8 @@ actionFactory.addActionCommunicate(freeTextPath, "Answer", '"Here is the answer.
 
 When the DigitalMenu receives free-text input, the Dialog Engine checks trained intents before falling through to NoMatch. See the NLU section in `examples/digital-bot-flow.md`.
 
+In bot flows (`createFlowBotAsync`), where `AskForIntent` is valid, the deployed action carries one output path per associated intent (keyed by the intent id, labelled with the intent name) plus `__NO_INTENT__`, `__KNOWLEDGE__` and `__MAX_NO_INPUTS__`. `flow_ir` resolves those as ordinary edges and lists the intents in the node's `description`, so a session can verify that each intent reached its task by reading the IR back. In execution data the action appears as `actionAskForIntent`, and its `outputPathId` is the intent id that matched, so `flow_execution_data`'s `takenBranch` names the intent by label.
+
 ## Output path enable/disable
 
 `ArchActionOutput.enabled` controls whether an output path (MaxNoMatches, MaxNoInputs, etc.) is active. Paths default to disabled on most action types. Adding actions to a disabled path produces "Unreachable because path is disabled" warnings. Check `canEnableDisable` before setting.

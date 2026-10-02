@@ -4,9 +4,11 @@ import platformClient from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
 import { deployFlow } from "./tools/deploy-flow.ts";
 import { findFlow } from "./tools/find-flow.ts";
+import { findFlowExecution } from "./tools/find-flow-execution.ts";
 import { findQueue } from "./tools/find-queue.ts";
 import { flowAction } from "./tools/flow-action.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
+import { flowExecutionData } from "./tools/flow-execution-data.ts";
 import { flowIr } from "./tools/flow-ir.ts";
 import { searchInFlow } from "./tools/search-in-flow.ts";
 import { testBotFlow } from "./tools/test-bot-flow.ts";
@@ -69,6 +71,20 @@ server.registerTool(
     "search_in_flow",
     searchInFlowTool.config,
     searchInFlowTool.handler,
+);
+
+const findFlowExecutionTool = findFlowExecution({ architectApi });
+server.registerTool(
+    "find_flow_execution",
+    findFlowExecutionTool.config,
+    findFlowExecutionTool.handler,
+);
+
+const flowExecutionDataTool = flowExecutionData({ architectApi });
+server.registerTool(
+    "flow_execution_data",
+    flowExecutionDataTool.config,
+    flowExecutionDataTool.handler,
 );
 
 const deployFlowTool = deployFlow({
