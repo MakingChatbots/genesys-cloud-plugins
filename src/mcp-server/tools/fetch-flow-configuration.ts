@@ -26,6 +26,14 @@ function describeFailure(flowId: string, err: unknown): string {
     if (status === 404) {
         return `Flow "${flowId}" not found. Check the flow id.`;
     }
+    if (status === 410) {
+        return (
+            `Flow "${flowId}" has been deleted (410)` +
+            (detail ? `: ${detail}` : ".") +
+            " Its configuration is no longer retrievable; execution data recorded " +
+            "before the deletion may still exist."
+        );
+    }
     if (status === 401) {
         return (
             `Not authenticated with Genesys Cloud (401) fetching flow "${flowId}": ` +

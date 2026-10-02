@@ -37,6 +37,9 @@ This plugin allows you to:
    * `Textbots > *`
    * `Architect > Dependency Tracking > View`
    * `Routing > Queue > View`
+   * `Architect > Flow Instance > View`
+   * `Architect > Flow Instance > Search`
+   * `Architect > Flow Instance Execution Data > View`
 
 ## Usage
 

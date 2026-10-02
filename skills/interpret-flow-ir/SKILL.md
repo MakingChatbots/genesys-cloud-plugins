@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: This skill should be used when interpreting the JSON returned by the flow_ir, flow_action or search_in_flow tools, or when the user asks questions about a deployed Genesys Cloud Architect flow, including one they name only by its flow name (resolve it with find_flow first) or a queue they name only by its queue name (resolve it with find_queue first). Structural questions such as "analyse this flow", "trace the path through the flow", "what happens when the customer says X", "why is this task unreachable", "check the flow for missing error handling", "find dead logic", or "does this flow loop". Semantic questions such as "what does this decision check", "what prompt does it play", "what does this data action send", or "what does pressing 2 do". Search questions such as "find every action that references this queue", "which actions use Flow.DNIS", "where does this flow mention that data action", or "which actions play a prompt containing X". Use it to answer control-flow questions from the IR instead of guessing from the flow's raw configuration JSON, to find the actions worth looking at without fetching them all, and to fetch the per-action settings the IR omits.
+description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution or flow_execution_data tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), and execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
 ---
 
 # Interpreting Flow IRs
@@ -11,14 +11,16 @@ Branches, loops, IVR menu choices, and cross-task jumps are already resolved
 into edges. Answer structural questions from this IR, never by re-deriving
 control flow from the flow's raw configuration JSON.
 
-The tools are a trio. `search_in_flow` owns **discovery** — which actions mention a
-given name, expression, or phrase (see "Content search"). `flow_ir` owns
+The static tools are a trio. `search_in_flow` owns **discovery** — which actions
+mention a given name, expression, or phrase (see "Content search"). `flow_ir` owns
 **structure** — what connects to what. `flow_action` owns **semantics** — what an
 individual action is configured to do (see "Action semantics"). The usual order
 runs the same way: search to find the ids worth caring about, trace to see how
-they connect, then inspect only those.
+they connect, then inspect only those. A fourth concern, **what actually happened
+on one run**, belongs to `find_flow_execution` and `flow_execution_data` (see
+"Execution data"); they join back to the same ids.
 
-All three take a flow id, not a flow name. When only the name is known (e.g.
+The static tools take a flow id, not a flow name. When only the name is known (e.g.
 "analyse Book_Payment"), resolve it first with `find_flow`, which searches flow
 names and returns each match's id, name, type, and published version.
 
@@ -280,6 +282,231 @@ only**, never key names, so every hit is real content. But:
 - A match is text, not structure. `search_in_flow` finding a queue name in six
   actions says those six mention it, not that six transfers exist.
 
+## Execution data: `find_flow_execution` and `flow_execution_data`
+
+The IR says what *could* happen. **Execution data** is what *did* happen on one
+run: Genesys Cloud's historical record of a single flow instance, an ordered
+event log of every action executed with timestamps, the messages sent, variable
+snapshots and the exit reason. Reach for it when the question is about a real
+conversation or a test run rather than about the flow's design: "what did this
+customer's call do", "why did the bot loop", "which branch ran", "did it error",
+"is the flow working", "show me how my test went through the flow".
+
+**Two tools.** `find_flow_execution` lists instances by `conversationId` and/or
+`flowId` (optionally `onlyWithErrors`), returning each instance's `executionId`,
+flow name/type/version, times and any `flowErrorReason`/`flowWarningReason`,
+oldest first. A conversation that passed through several flows yields one entry
+per flow. `flow_execution_data` takes one `executionId` and returns the log.
+Prefer `conversationId` when searching: the API indexes on it, cannot filter by
+date, caps results at 200, and only keeps 10 days. A run is listed only once it
+has **ended**; one still waiting for input is not yet there. `onlyWithErrors` is
+applied to the fetched instances, since the API's query operators have no
+negation or null test. So on a busy flow the filter sees only the 200 instances
+the API returned: errored runs older than that are invisible, and an empty
+result means "none among the fetched", not "none at all".
+
+**`find_flow_execution`'s envelope.**
+`{ query, executions: [{ executionId, flowId, flowName, flowType, flowVersion,
+conversationId, workitemId?, startDateTime, endDateTime, flowErrorReason?,
+flowWarningReason? }], total, notes? }`. `executions` is the list to iterate;
+`flowErrorReason` and `flowWarningReason` are present only when set (the API's
+`NONE` is normalised to absence). `total` is the API's count **before** the
+200 cap and before `onlyWithErrors` is applied, so it routinely exceeds
+`executions.length`; compare the two before asserting "exactly N runs", as
+with `totalMatchedActions` in search. `notes`, when present, explains an empty
+or capped result.
+
+**`test_bot_flow` runs are instances too.** The `sessionId` it returns *is* the
+`executionId`; pass it straight to `flow_execution_data` to see exactly how a
+test traversed the flow, and expect the data within seconds of the run ending.
+Such runs have a null conversation id, so find them by `flowId` rather than
+`conversationId`; `Flow.IsTest` is false on them.
+
+### The envelope
+
+`{ executionId, flowId, flowName, flowType, flowVersion, conversationId,
+startDateTime, endDateTime, durationMs, flowExitReason, logLevel, executionInfo,
+isTruncated, isSecure, flowIsDebug, division, summary, events, ir?, notes? }`
+
+Only `executionId`, `conversationId`, `durationMs`, `flowExitReason`,
+`logLevel`, `summary`, `events`, `ir` and `notes` are the tool's own fields.
+The rest (`flowId` through `division`, and anything else that appears) are the
+instance's top-level Genesys fields passed through untouched: observed, not a
+contract, like the raw `action` subtree in `flow_action`. Read them
+defensively.
+
+- `summary.eventKinds` counts events per kind; `summary.repeatedActions` lists
+  actions executed more than once with the `index` of each occurrence. **A
+  non-empty `repeatedActions` is the signature of a loop**; read those indexes
+  in `events` to see what changed (or did not) between iterations.
+  `summary.loops` lists each Loop action with its `iterations`, counted from
+  the `eventLoop` events it emitted (one per completed iteration; the body's
+  actions also appear in `repeatedActions`). `summary.asksWithRetries` lists
+  ask/menu actions that consumed more than one participant input: a no-match
+  or no-input retry happens *inside* the one action (as extra turns in its
+  `execution[]`), so it never appears as a repeated action. All three lists
+  empty means a straight run.
+- `events[]` is the log in **execution order**. Each event is one entry of the
+  raw `execution[]` array unwrapped: `index` (array position), `kind` (the raw
+  event key), and every field of the payload passed through untouched. Kinds
+  seen so far: containers `startedFlow`/`endedFlow`,
+  `startedBotState`/`endedBotState` (bot flows), `startedTask`/`endedTask`;
+  actions `actionCommunicate`, `actionUpdateData`, `actionDecision`,
+  `actionSwitch`, `actionLoop`, `actionAskForIntent`, `actionAskForSlot`,
+  `actionDigitalMenu`, `actionJumpToTask`, `actionExitBotFlow`; and the
+  non-action events `eventLoop` (end of one Loop iteration, linked to its Loop
+  action by `relatedAction`, carrying the new index in `variables[]`) and
+  `eventError`. Report unfamiliar kinds by their fields rather than assuming a
+  shape.
+- An `eventError` carries `context.reason` (e.g.
+  `Error.Expression.Value.NotAllowed.NotSet`), `context.functionNameOrOperator`
+  and `context.settingName`, and the tool adds `relatedAction` (`index`,
+  `actionId`, `actionName`) by matching `context.executionId` to the action
+  event that was running. The run then ends with
+  `flowExitReason: "FLOW_ERROR_EXIT"`, and `find_flow_execution` shows the same
+  reason as `flowErrorReason`.
+- `notes`, when present, is advisory prose about this instance (log level,
+  truncation, join caveats). Read it before making claims.
+
+### Joining to the IR
+
+The join key is **`actionId`**: every action event carries the design-time GUID,
+which is the `id` of the `flow_ir` node whose `kind` is `"action"`, and is
+accepted verbatim by `flow_action`. `actionName` equals the IR `label` but names
+are not unique, so join on the GUID. A `startedBotState.stateId` (bot flows) is
+the IR task id; its node is `<stateId>::start`.
+
+By default (`includeIr: true`) the tool does the join: each action event gains
+`ir: { nodeId, actionType, taskId, taskName, terminal, reachable, successors,
+takenBranch? }` and each container event (`startedBotState`, `startedTask`)
+gains `ir: { nodeId, taskId, taskName }`; an event with `ir: null` found no
+node. The response's `ir` block then carries
+`configuration` (whether the join used the exact `flowVersion` that ran or fell
+back to the latest), `unmatchedActionIds`, `unmatchedStateIds`,
+`actionsNotExecuted` (every IR action this run never reached, with its
+`reachable` flag) and the parse `warnings`. `actionsNotExecuted` is this run's
+*negative space*: the branches not taken. It is not dead logic; one run proves
+nothing about other runs.
+
+A non-empty `unmatchedActionIds` has two causes, told apart by `configuration`.
+If the join fell back to `{ latest: true }`, the flow has probably been
+redeployed since the run and the executed action no longer exists. If the join
+used the exact `flowVersion` that ran, the action lives in a called common
+module or bot flow, whose actions the parent flow's IR never contains. Do not
+report a redeploy without checking which.
+
+Three naming traps:
+
+- Event kinds and IR types differ by convention: **`action<Type>` ↔
+  `<Type>Action`** (`actionCommunicate` is `CommunicateAction`,
+  `actionDecision` is `DecisionAction`, `actionAskForSlot` is
+  `AskForSlotAction`, `actionLoop` is `LoopAction`, `actionSwitch` is
+  `SwitchAction`), with exceptions where Architect renamed the action:
+  `actionUpdateData` is `UpdateVariableAction`, `actionJumpToTask` is
+  `TransferTaskAction` and `actionAskForIntent` is `AskForNLUIntentAction`.
+  The `ir.actionType` annotation settles it; never guess from the kind alone.
+  `AskForNLUIntentAction` carries its per-intent routing on its own outputs
+  (one per intent, keyed by intent id, plus `__NO_INTENT__`, `__KNOWLEDGE__`
+  and `__MAX_NO_INPUTS__`), so its `takenBranch` resolves to the intent's
+  label, its `terminal` flag is `false`, and its `description` lists the
+  intents it can recognise. It raises no `UNRESOLVED_INTENT_FANOUT`; that
+  warning is for the listen states whose routing lives outside the action.
+- The IR's `order` is DFS discovery, **not** execution order. Sequence from
+  `events[].index`, never from `order`.
+- `trackingId` is the action number shown in the Architect UI. Gaps in it are
+  authoring history (deleted actions), **not** missing events. Each event also
+  has its own `executionId`, distinct per execution of an action; it tells
+  iterations of a looped action apart. The instance-level `executionId` is a
+  different thing: the instance id.
+
+### Reading the log
+
+- **Branches.** Execution data has no edges, but every branching action
+  records the path it took as `outputPathId` (a Decision's `__YES__`/`__NO__`,
+  an ask's `__DEFAULT__`/`__MAX_NO_MATCHES__`, an intent ask's intent GUID or
+  `__NO_INTENT__`, a Switch case's GUID or `__DEFAULT__`, a menu choice's GUID,
+  a Loop's `__LOOP__`) and usually `outputPathName`. That id is exactly the
+  suffix of the IR branch-output node, so `ir.takenBranch` gives
+  `{ nodeId: "<actionId>::<outputPathId>", label, inIr }`: the branch that ran,
+  by its IR label. `inIr: false` means the IR has no branch-output for that
+  path: the run took an outcome the graph does not model, most often a
+  `DigitalMenuAction` choice (see "Known blind spots"). The `outputPathName`
+  is then the only label available. The sibling branch-outputs in `successors`
+  are the roads not taken on this run. A Decision also records
+  `inputData.condition` (the
+  evaluated boolean); a Switch records `inputData.value` and the matching
+  `inputData.cases[]`; an intent ask records `inputData.enabledIntents[]` and
+  the matched intent in `outputVariables[]` as `Session.ActiveIntent`; a slot
+  ask records `outputData.askResult` and the slot in `outputVariables[]`; a
+  menu records `outputData.selection`; a Loop records `inputData.loopCount` and
+  `outputData.currentIndex`.
+- **Participant input.** Asks and menus carry an `execution[]` of turns: each
+  `toParticipant` is a prompt the customer saw and each `fromParticipant`
+  (`digital.text`) is what they typed. A failed attempt shows as an extra turn
+  pairing their input with the `inputData.noMatch` prompt. Quote these to
+  explain what the customer did.
+- **Variables.** `startedFlow.variables[]` is the snapshot at entry: the
+  built-ins (`Flow.*`, `Session.*` or `Call.*`) plus the flow's own variables
+  (GUID `variableId`), `startedBotState.variables[]` the state's, and
+  `endedFlow.outputVariables[]` the declared outputs. Assignments *are* logged:
+  `actionUpdateData.statements[]` lists each variable and the value written, in
+  order. Sentinels `ValueTooLarge`, `ValueRedacted` and `ValueInvalid` replace a
+  value and should be reported as such.
+- **Communications.** `communication.toParticipant.digitalItems[].text` is the
+  rendered message with expressions already evaluated, so it is what the customer
+  saw. Fields such as `queuedAudioFlushed` are shared with voice; expect audio
+  items on a call flow.
+- **Log level.** `logLevel` governs which sections exist. At levels below `all`,
+  variables, communications or action inputs/outputs may be absent or empty
+  because they were not recorded. That is expected, not a flow defect, and the
+  response notes it.
+- **Timestamps.** Each event's `dateTime` is when it ran; a communication's own
+  `dateTime` is when the message was emitted and can differ by milliseconds. Use
+  `index` for order and the timestamps for duration only.
+- **Ending.** `endedFlow.flowExitReason` says how the run ended (`FLOW_EXIT` is
+  a normal exit, `FLOW_ERROR_EXIT` an error; see the `eventError` just before
+  it). On a bot flow `endedFlow.naturalLanguageUnderstanding.intent.intentName`
+  is the intent the run ended with. No `endedFlow` means the run had not
+  finished or the log was cut; `isTruncated: true` means the execution cap was
+  hit.
+
+### Recipes
+
+**"What did this conversation do?"** `find_flow_execution` with the
+`conversationId`, then `flow_execution_data` on each instance oldest first.
+Narrate the events as the customer experienced them, quoting `digitalItems[].text`,
+and name the task from `ir.taskName` at each transition.
+
+**"Why did it loop?"** Three shapes, told apart by the summary. If
+`summary.asksWithRetries` is non-empty, the "loop" is one ask or menu
+re-prompting: read that event's `execution[]` turns to see what the customer
+typed and which `noMatch` prompt answered them. If `summary.loops` is
+non-empty, a Loop action ran its body that many times by design; its
+`eventLoop` events carry the index per iteration. If `summary.repeatedActions`
+is non-empty *without* a corresponding Loop, control genuinely came back round
+through a jump: compare the events at its `eventIndexes` and those between
+them, find the decision whose `takenBranch` kept choosing the way back (the IR
+marks that jump's edge `backEdge: true`), then fetch it with `flow_action` to
+read the condition.
+
+**"Did the flow error?"** `find_flow_execution` with `onlyWithErrors: true`
+(by `flowId` to sweep recent runs, or with the `conversationId`). The
+`flowErrorReason` names the failure; in the instance, the `eventError` event's
+`relatedAction` and `context.reason` say which action failed and why. A sweep
+by `flowId` covers only the most recent 200 instances, so "no errors" from it
+means none among those; say so rather than clearing the flow outright.
+
+**"Is the flow working?"** Run `test_bot_flow` and pass its `sessionId` to
+`flow_execution_data`, or sample recent instances by `flowId`. Confirm the
+expected actions appear in `events`, and check `actionsNotExecuted` against
+what the test was meant to cover.
+
+**Empty or missing data.** Execution data exists only for flows published after
+storage was enabled for the org, and only for 10 days. A not-found result or an
+empty search is therefore often a configuration or age matter rather than proof
+that the conversation never ran the flow; the tool's error text and `notes` list
+the possibilities.
+
 ## Analysis recipes
 
 **Trace "what happens when..."**: walk successors from the entry task-start,
@@ -296,7 +523,10 @@ design.)
 `reachable: false` nodes (grouped by `taskName`) are provably orphaned actions
 no task entry point can reach. When `false`, they are merely not provably
 reachable, since the unmodelled intent routing may reach them; report them as
-"unverifiable", not dead.
+"unverifiable", not dead. Execution data settles it the other way: an action
+that appears in any run's `events` was reached, whatever its `reachable` flag
+says. An executed node marked `reachable: false` exposes a modelling gap in
+the IR, not a flow defect.
 
 **Orphaned tasks**: `reachable` does NOT mean "reachable from the flow entry".
 Every task-start is a traversal root, so a task nothing ever calls still shows
@@ -332,8 +562,11 @@ human-readable and non-contractual; key all reasoning off `code`.
 
 ## Known blind spots
 
-- **Intent routing is absent** (see `UNRESOLVED_INTENT_FANOUT`). Qualify
-  reachability and path claims wherever a listen action appears.
+- **Intent routing is absent for listen states** (see
+  `UNRESOLVED_INTENT_FANOUT`): `WaitForInputAction` and
+  `AskForNLUNextIntentAction`. Qualify reachability and path claims wherever
+  one appears. `AskForNLUIntentAction` is not affected: its per-intent
+  outputs are ordinary edges in the IR.
 - **Digital-bot menu choices** (`DigitalMenuAction`) are not expanded. IVR
   `menuChoiceList` menus are resolved. The unexpanded choices are visible in the
   action's raw config via `flow_action`, but their routing is not in the graph.
