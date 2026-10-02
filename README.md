@@ -9,23 +9,45 @@ Use Claude Code to create, test, diagnose and document your Genesys Cloud's Arch
 This plugin allows you to:
 
 * [Create architect flows of any type](#create-architect-flows-of-any-type)
+* [Document an entire flow](#document-an-entire-flow)
 * [Run automated tests against Digital flows](#run-automated-tests-against-digital-flows)
-* [Create and test flow expressions](#create-and-test-flow-expressions)
-* [Inspect and fix issues in flows](#inspect-and-fix-issues-in-flows)
-* [Document flows](#document-flows)
+* [Create flow expressions](#create-flow-expressions)
+* [Identify issues with a flow](#identify-issues-with-a-flow)
+* [Asking questions of a flow](#asking-questions-of-a-flow)
 * _and more..._
 
-## Getting started
+## Installation
 
-Follow the [installation guide](#installation), then simply tell Claude Code what you want it to do.
+1. Open Claude Code
+2. Type the following to add the marketplace for the plugin and install it:
+   1. Add the marketplace
+      ```
+      /plugin marketplace add MakingChatbots/genesys-cloud-plugins
+      ```
 
-Below are examples of each of its capabilities:
+   2. Install the plugin
+      ```
+      /plugin install genesys-cloud-architect@makingchatbots-genesys-cloud-plugins
+      ```
+3. When asked, provide the Credentials for an OAuth Client with the following permissions:
+   * `Architect > Flow > *`
+   * `Architect > Job > *`
+   * `Architect > UI > *`
+   * `Language Understanding > NLU Domain Version > View`
+   * `Textbots > *`
+   * `Architect > Dependency Tracking > View`
+   * `Routing > Queue > View`
+
+## Usage
+
+Once you've installed the plugin simply ask Claude to create, explain, test, diagnose flow, and much more...
+
+Here are some examples of what it can do:
 
 ### Create architect flows of any type
 
-Asking Claude Code to create a flow will have it create, publish and test a flow using the [Architect Scripting SDK](https://mypurecloud.github.io/purecloud-flow-scripting-api-sdk-javascript/).
-
-Below is an example of a simple flow, but they can be much more complex:
+Manually dragging boxes in Architect can now become a thing of the past. Simply tell Claude what
+you want the flow to do and have it create, publish and test it using the [Architect Scripting SDK](https://mypurecloud.github.io/purecloud-flow-scripting-api-sdk-javascript/):
 
 > Create a Bank bot flow with two intents: "Check Account Balance" (collects an 8-digit AccountNumber slot) and "Find a Branch" (collects a 5-digit ZipCode slot).
 >
@@ -46,6 +68,22 @@ Resulting in a flow:
 
 [Read more...](https://makingchatbots.com/i/200764669/create-your-flows-with-ai)
 
+### Document an entire flow
+
+The more complex a flow becomes the harder it is to understand. Since this plugin allows Claude Code to
+understand flows, it can be used to document them too...
+
+> Document the flow "Bank Bot".
+>
+> Show me how it hangs together, quote what the bot actually says at each step,
+> and flag anything that looks wrong.
+>
+> If it is too big for one diagram, split it by responsibility.
+
+<img src="docs/assets/flow-documentation.png" width="500">
+
+[Read more...](https://makingchatbots.com/i/213933939/documenting-your-flows-with-ai)
+
 ### Run automated tests against Digital flows
 
 The plugin allows Claude Code to run tests against Digital bot flows. This is useful when
@@ -55,7 +93,10 @@ it's developing flows, or simply to test for edge-cases in existing flows:
 
 <img src="docs/assets/running-tests.png" width="500">
 
-### Create and test flow expressions
+### Create flow expressions
+
+The plugin can create expressions for you, along with an explanation of how they work. It does this by creating
+a test harness in a Digital bot flow which it can then create and test the expression in.
 
 > My Genesys Architect flow needs to extract the 'author' from the JSON retrieved from a participant attribute below:
 >
@@ -65,49 +106,46 @@ it's developing flows, or simply to test for edge-cases in existing flows:
 >
 > Create a Digital Bot flow to test your expression against different test cases.
 
-
 <img src="docs/assets/expression-result.png" width="500">
 
 [Read more...](https://makingchatbots.com/i/200764669/create-and-test-expressions)
 
-### Inspect and fix issues in flows
+### Identify issues with a flow
 
-TODO Add example
+Issues in flows can easily go unnoticed, quietly affecting customers. They're now easily identified by simply asking
+Claude Code to look for them:
 
-### Document flows
+> Review the flow "Main Intent Router" for problems.
+> 
+> Give me a table of every issue you find, ordered by severity,
+> with what it would mean for a customer and where in the flow to fix it.
 
-TODO Add example
+<img src="docs/assets/identify-flow-issues.png" width="500">
 
-## Installation
+[Read more...](https://makingchatbots.com/i/213933939/identify-issues-with-a-flows)
 
-1. Open Claude Code
-2. Type the following to add the marketplace and install the plugin:
-   1. Add the marketplace
-      ```
-      /plugin marketplace add MakingChatbots/genesys-cloud-plugins
-      ```
+### Asking questions of a flow
 
-   2. Install the plugin
-      ```
-      /plugin install genesys-cloud-architect@makingchatbots-genesys-cloud-plugins
-      ```
-3. When asked, provide the Credentials for an OAuth Client with the following permissions:
-   * `Architect > Flow > *`
-   * `Architect > Job > *`
-   * `Architect > UI > *`
-   * `Language Understanding > NLU Domain Version > View`
-   * `Textbots > *`
-   * `Architect > Dependency Tracking > View`
-   * `Routing > Queue > View`
+It isn't always easy to know why or how the flow behaves in a particular way, so now
+you can ask how parts of your flow work:
+
+> Explain why the "Was the book bought in store?" question in the flow
+> "Main Intent Router" goes silent when the customer doesn't answer.
+>
+> Use simple illustrations to help me understand.
+
+<img src="docs/assets/flow-explanation.png" width="500">
+
+[Read more...](https://makingchatbots.com/i/213933939/asking-questions-of-a-flow)
 
 ## Who built this?
 
-This is built by [Lucas Woodward](https://makingchatbots.com/about#§who-am-i).
+This is built by me, [Lucas Woodward](https://makingchatbots.com/about#§who-am-i).
 
-I've been building this in public - engaging with the Genesys community with each milestone. If you'd like to keep up
-to date with releases then [follow me on LinkedIn](https://www.linkedin.com/in/lucas-woodward-the-dev/).
+I've been building this in public, and engaging with the Genesys community with each milestone.
+If you'd like to keep up to date with releases then [follow me on LinkedIn](https://www.linkedin.com/in/lucas-woodward-the-dev/).
 
-What else I have built:
+These are some of the other projects I've built:
 
 * [Genesys Cloud MCP Server](https://github.com/MakingChatbots/genesys-cloud-mcp-server)
 * [Genesys Cloud n8n community node](https://github.com/MakingChatbots/n8n-nodes-genesys-cloud)
