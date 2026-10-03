@@ -40,6 +40,7 @@ This plugin allows you to:
    * `Architect > Flow Instance > View`
    * `Architect > Flow Instance > Search`
    * `Architect > Flow Instance Execution Data > View`
+   * `Architect > User Prompt > View`
 
 ## Usage
 

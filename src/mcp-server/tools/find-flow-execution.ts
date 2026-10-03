@@ -1,6 +1,6 @@
 import type { ArchitectApi, Models } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { formatApiError, toApiError } from "./api-error.ts";
+import { authHint, formatApiError, toApiError } from "./api-error.ts";
 import type { ToolFactory } from "./types.ts";
 
 /** The API's own ceiling on results per query, per the help centre. */
@@ -240,11 +240,9 @@ export const findFlowExecution: ToolFactory<ToolConfig, typeof inputSchema> = ({
         } catch (err) {
             const { status } = toApiError(err);
             const hint =
-                status === 403
-                    ? " The OAuth client needs the 'Architect > Flow Instance > Search' permission."
-                    : status === 400
-                      ? " The query was rejected; check that the conversationId and flowId are well-formed Genesys Cloud ids."
-                      : "";
+                status === 400
+                    ? " The query was rejected; check that the conversationId and flowId are well-formed Genesys Cloud ids."
+                    : authHint(status, "Architect > Flow Instance > Search");
             return {
                 isError: true,
                 content: [

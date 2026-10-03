@@ -25,6 +25,27 @@ export function toApiError(err: unknown): ApiError {
     return { status, code, message };
 }
 
+/**
+ * Guidance to append to an auth failure's message. `permission` names the
+ * Genesys Cloud permission the tool needs, e.g. "Routing > Queue > View
+ * (routing:queue:view)". Empty for any other status.
+ */
+export function authHint(
+    status: number | undefined,
+    permission: string,
+): string {
+    if (status === 401) {
+        return (
+            " The access token is missing or expired; re-authenticate " +
+            "(restart the MCP server) and retry."
+        );
+    }
+    if (status === 403) {
+        return ` The OAuth client needs the '${permission}' permission.`;
+    }
+    return "";
+}
+
 export function formatApiError(err: unknown): string {
     const { status, code, message } = toApiError(err);
     const parts: string[] = [];

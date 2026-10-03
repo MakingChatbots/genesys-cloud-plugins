@@ -9,7 +9,7 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi, Models } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { formatApiError, toApiError } from "./api-error.ts";
+import { authHint, formatApiError, toApiError } from "./api-error.ts";
 import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
 import type { ToolFactory } from "./types.ts";
 
@@ -24,6 +24,7 @@ const DEFAULT_MAX_WAIT_MS = 45_000;
 
 /** How long Genesys Cloud keeps execution data, per the help centre. */
 const RETENTION_DAYS = 10;
+const PERMISSION = "Architect > Flow Instance > View";
 
 type JobResult = Models.GetFlowExecutionDataJobResult;
 
@@ -135,8 +136,8 @@ function describeEntityFailure(
         case "403":
             return (
                 `Not authorised to read execution data for "${executionId}" (403): the ` +
-                "OAuth client needs the 'Architect > Flow Instance > View' permission " +
-                "and division access to the flow."
+                `OAuth client needs the '${PERMISSION}' permission and division ` +
+                "access to the flow."
             );
         default:
             return (
@@ -151,13 +152,8 @@ function describeApiFailure(executionId: string, err: unknown): string {
     if (err instanceof ExecutionDataError) return err.message;
     const { status } = toApiError(err);
     if (status === 404) return describeNotFound(executionId);
-    if (status === 403) {
-        return (
-            `Not authorised to read execution data (403): the OAuth client needs the ` +
-            "'Architect > Flow Instance > View' permission."
-        );
-    }
-    return `Failed to retrieve execution data for "${executionId}": ${formatApiError(err)}`;
+    const hint = authHint(status, PERMISSION);
+    return `Failed to retrieve execution data for "${executionId}": ${formatApiError(err)}.${hint}`;
 }
 
 /** Unwrap the downloaded file, `{ "flow": {...} }`, tolerating a bare flow. */
