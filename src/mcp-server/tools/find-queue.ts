@@ -32,10 +32,12 @@ interface FindQueueResult {
 }
 
 /**
- * The Routing API's name filter is an exact match unless the value carries
- * leading/trailing asterisks, unlike the Architect flows API which matches a
- * fragment natively. Wrap the fragment so both find_* tools behave alike, and
- * strip any asterisks the caller already added so they aren't doubled up.
+ * The Routing API's name filter is an exact match on the whole string unless
+ * the value carries leading/trailing asterisks. Wrap the fragment so a
+ * portion of the name matches, and strip any asterisks the caller already
+ * added so they aren't doubled up. (The Architect flows API tokenises its
+ * filter differently, so find_flow wraps each word instead; see its
+ * toWildcardName.)
  */
 function toWildcardName(name: string): string {
     const fragment = name.trim().replace(/^\*+|\*+$/g, "");

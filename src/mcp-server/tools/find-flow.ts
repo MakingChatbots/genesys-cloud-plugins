@@ -27,6 +27,25 @@ interface FindFlowResult {
     notes?: string[];
 }
 
+/**
+ * The Architect flows API splits the name filter on whitespace and requires
+ * every word to match a whole token of the flow name, ANDed in any order.
+ * Underscores do not split tokens, so a bare "Returns" misses
+ * "UK_Returns_Desk Main Flow" and "Order Status" misses "Order_Status". Asterisk
+ * wildcards are honoured inside a word, so wrap each word in them to get
+ * "every word appears somewhere in the name" semantics. Wrapping the whole
+ * query is not enough: "*Order Status*" becomes "*Order" and "Status*", which
+ * both fail against the single token "Order_Status". Any asterisks the caller
+ * already added are stripped so they aren't doubled up.
+ */
+export function toWildcardName(name: string): string {
+    return name
+        .trim()
+        .split(/\s+/)
+        .map((word) => `*${word.replace(/^\*+|\*+$/g, "")}*`)
+        .join(" ");
+}
+
 function toFlowSummary(flow: platformClient.Models.Flow): FlowSummary {
     return {
         id: flow.id ?? "",
@@ -48,9 +67,12 @@ const inputSchema = {
         .string()
         .min(1)
         .describe(
-            "The flow name, or a portion of it, to search for. Matched " +
-                "case-insensitively against flow names, so a partial name " +
-                "like 'payment' finds 'Book_Payment'.",
+            "The flow name, or some words from it, to search for. Every " +
+                "word must appear somewhere in the flow name, " +
+                "case-insensitively and in any order, so 'payment' finds " +
+                "'Book_Payment' and 'Returns' finds 'UK_Returns_Desk Main Flow'. " +
+                "Wildcards are added automatically; do not include " +
+                "asterisks.",
         ),
     type: z
         .array(z.string())
@@ -71,9 +93,11 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             "human-readable name users know (e.g. 'Book_Payment') to the flow " +
             "id every other flow tool requires. Returns each matching flow's " +
             "id, name, type and published version. Matching is a " +
-            "case-insensitive search over flow names that accepts a portion " +
-            "of the name; flows whose name equals the query exactly are " +
-            "listed first. The returned id is accepted verbatim by flow_ir, " +
+            "case-insensitive search over flow names in which every word of " +
+            "the query must appear somewhere in the name, in any order, so " +
+            "a fragment of a word or a few words from the name both work; " +
+            "flows whose name equals the query exactly are listed first. " +
+            "The returned id is accepted verbatim by flow_ir, " +
             "flow_action, search_in_flow and flow_dependencies. A " +
             "publishedVersion of null means the flow has never been " +
             "published.",
@@ -87,12 +111,13 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
     handler: async ({ name, type }) => {
         try {
             const flows: platformClient.Models.Flow[] = [];
+            const wildcardName = toWildcardName(name);
 
             let total = 0;
             let pageNumber = 1;
             while (true) {
                 const page = await architectApi.getFlows({
-                    name,
+                    name: wildcardName,
                     pageSize: 100,
                     pageNumber,
                     ...(type?.length ? { type } : {}),
@@ -119,9 +144,10 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             const notes: string[] = [];
             if (returned.length === 0) {
                 notes.push(
-                    `No flows matched "${name}". The search already accepts ` +
-                        "a portion of the name, so try a shorter fragment, " +
-                        "or drop the type filter if one was given.",
+                    `No flows matched "${name}". Every word of the query ` +
+                        "must appear in the flow name, so drop words you " +
+                        "are unsure of (keep the most distinctive one), or " +
+                        "drop the type filter if one was given.",
                 );
             } else if (total > returned.length) {
                 // Only claim exact-first ordering when an exact match was
