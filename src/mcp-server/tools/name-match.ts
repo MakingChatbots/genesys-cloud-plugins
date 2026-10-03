@@ -2,7 +2,10 @@ interface Named {
     name?: string;
 }
 
-/** The form two names are compared in: case-insensitive. Use as a Map key. */
+/**
+ * The form two names (or other case-insensitive identifiers, e.g. language
+ * tags) are compared in. Use as a Map key.
+ */
 export function nameKey(name: string | undefined): string {
     return (name ?? "").toLowerCase();
 }

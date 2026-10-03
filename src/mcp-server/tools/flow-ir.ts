@@ -5,6 +5,7 @@ import {
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
 import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
+import { isExactNameMatch } from "./name-match.ts";
 import type { ToolFactory } from "./types.ts";
 
 /**
@@ -20,8 +21,7 @@ function findTask(
     if (byId) {
         return { match: byId };
     }
-    const lowered = query.toLowerCase();
-    const byName = tasks.filter((t) => t.name.toLowerCase() === lowered);
+    const byName = tasks.filter((t) => isExactNameMatch(t, query));
     if (byName.length > 1) {
         return { ambiguous: byName };
     }

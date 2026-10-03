@@ -112,10 +112,9 @@ function toPromptSummary(
     prompt: platformClient.Models.Prompt,
     language: string | undefined,
 ): PromptSummary {
+    const wantedLanguage = nameKey(language);
     const resources = (prompt.resources ?? []).filter(
-        (r) =>
-            !language ||
-            (r.language ?? "").toLowerCase() === language.toLowerCase(),
+        (r) => !language || nameKey(r.language) === wantedLanguage,
     );
     return {
         id: prompt.id ?? "",
@@ -179,11 +178,6 @@ function buildDurationTotals(prompts: PromptSummary[]): DurationTotal[] {
     });
 }
 
-interface PromptReference {
-    id: string;
-    name?: string;
-}
-
 /**
  * Collect user prompt references from a flow configuration in encounter order.
  *
@@ -205,15 +199,14 @@ interface PromptReference {
  * literal. User prompt ids are GUIDs while system prompt ids look like
  * `__processing__`, so id-shaped values are the final filter.
  */
-export function collectPromptReferences(
-    configuration: unknown,
-): PromptReference[] {
-    const found = new Map<string, PromptReference>();
+export function collectPromptReferences(configuration: unknown): EntityRef[] {
+    const found = new Map<string, EntityRef>();
     const seen = new Set<object>();
 
     const add = (id: string, name: string | undefined) => {
-        if (found.has(id)) return;
-        found.set(id, { id, ...(name ? { name } : {}) });
+        const ref = toEntityRef({ id, name });
+        if (!ref || found.has(ref.id)) return;
+        found.set(ref.id, ref);
     };
 
     const walk = (node: unknown, key: string | undefined): void => {
@@ -417,7 +410,7 @@ export const getPrompts: ToolFactory<ToolConfig, typeof inputSchema> = ({
         // Fetch the flow first: it is one cheap call, and failing on it
         // before any prompt lookups means a bad flowId cannot discard
         // prompts already retrieved by id or name.
-        let flowReferences: PromptReference[] = [];
+        let flowReferences: EntityRef[] = [];
         if (flowId) {
             const fetched = await fetchFlowConfiguration(architectApi, flowId);
             if (!fetched.ok) {
