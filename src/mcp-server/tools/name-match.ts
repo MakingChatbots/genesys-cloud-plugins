@@ -2,8 +2,13 @@ interface Named {
     name?: string;
 }
 
+/** The form two names are compared in: case-insensitive. Use as a Map key. */
+export function nameKey(name: string | undefined): string {
+    return (name ?? "").toLowerCase();
+}
+
 export function isExactNameMatch(entity: Named, name: string): boolean {
-    return (entity.name ?? "").toLowerCase() === name.toLowerCase();
+    return nameKey(entity.name) === nameKey(name);
 }
 
 export function moveExactMatchToTop<T extends Named>(

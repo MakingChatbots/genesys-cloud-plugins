@@ -10,6 +10,7 @@ import { flowAction } from "./tools/flow-action.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
 import { flowExecutionData } from "./tools/flow-execution-data.ts";
 import { flowIr } from "./tools/flow-ir.ts";
+import { getPrompts } from "./tools/get-prompts.ts";
 import { searchInFlow } from "./tools/search-in-flow.ts";
 import { testBotFlow } from "./tools/test-bot-flow.ts";
 
@@ -85,6 +86,13 @@ server.registerTool(
     "flow_execution_data",
     flowExecutionDataTool.config,
     flowExecutionDataTool.handler,
+);
+
+const getPromptsTool = getPrompts({ architectApi });
+server.registerTool(
+    "get_prompts",
+    getPromptsTool.config,
+    getPromptsTool.handler,
 );
 
 const deployFlowTool = deployFlow({

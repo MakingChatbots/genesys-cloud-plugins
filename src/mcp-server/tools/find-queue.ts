@@ -1,17 +1,13 @@
 import type platformClient from "purecloud-platform-client-v2";
 import type { RoutingApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { formatApiError, toApiError } from "./api-error.ts";
+import { authHint, formatApiError, toApiError } from "./api-error.ts";
+import { type EntityRef, toEntityRef } from "./entity-ref.ts";
 import { isExactNameMatch, moveExactMatchToTop } from "./name-match.ts";
 import type { ToolFactory } from "./types.ts";
 
 const MAX_RETURNED_QUEUES = 50;
 const MAX_FETCHED_QUEUES = 200;
-
-interface EntityRef {
-    id: string;
-    name?: string;
-}
 
 interface QueueSummary {
     id: string;
@@ -46,13 +42,6 @@ function toWildcardName(name: string): string {
     return `*${fragment}*`;
 }
 
-function toEntityRef(
-    ref: { id?: string; name?: string } | undefined,
-): EntityRef | undefined {
-    if (!ref?.id) return undefined;
-    return { id: ref.id, ...(ref.name ? { name: ref.name } : {}) };
-}
-
 function toQueueSummary(queue: platformClient.Models.Queue): QueueSummary {
     const queueFlow = toEntityRef(queue.queueFlow);
     const emailInQueueFlow = toEntityRef(queue.emailInQueueFlow);
@@ -60,7 +49,7 @@ function toQueueSummary(queue: platformClient.Models.Queue): QueueSummary {
     return {
         id: queue.id ?? "",
         name: queue.name ?? "",
-        division: toEntityRef(queue.division) ?? null,
+        division: toEntityRef(queue.division),
         memberCount: queue.memberCount ?? null,
         joinedMemberCount: queue.joinedMemberCount ?? null,
         dateModified: queue.dateModified ?? null,
@@ -182,16 +171,16 @@ export const findQueue: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 content: [{ type: "text", text: JSON.stringify(result) }],
             };
         } catch (err) {
-            const permissionHint =
-                toApiError(err).status === 403
-                    ? " The OAuth client needs the 'Routing > Queue > View' permission."
-                    : "";
+            const hint = authHint(
+                toApiError(err).status,
+                "Routing > Queue > View",
+            );
             return {
                 isError: true,
                 content: [
                     {
                         type: "text",
-                        text: `Failed to search for queues: ${formatApiError(err)}${permissionHint}`,
+                        text: `Failed to search for queues: ${formatApiError(err)}${hint}`,
                     },
                 ],
             };

@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution or flow_execution_data tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), and execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
+description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution or flow_execution_data tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), prompt questions ("what does the caller hear here", "what does Prompt.Welcome say"; resolve with get_prompts), and execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
 ---
 
 # Interpreting Flow IRs
@@ -210,6 +210,30 @@ joins to its outcome by id: `cases[].referenceId` equals `paths[].outputId`. The
 matching `paths[]` entry supplies the outcome *name*, and the IR branch-output
 node `<actionId>::<outputId>` supplies where that outcome leads. Use
 `paths[].nextActionId` for nothing.
+
+## Prompt content: the `get_prompts` tool
+
+Audio-playing actions (Play Audio, Communicate, Menu, Collect Input) reference
+reusable *user prompts* by name, as `Prompt.<name>`, so the raw config returned by
+`flow_action` tells you *which* prompt plays but not what the caller hears or for
+how long. `get_prompts` resolves that. Three ways to ask, combinable in one call:
+
+- `flowId` — every user prompt the flow's latest configuration references, in
+  encounter order. Reach for this first when the question is about a flow's whole
+  script; one call replaces a `flow_action` sweep.
+- `promptNames` — names exactly as the config shows them (the `Prompt.` prefix is
+  accepted and stripped). Matching is exact, not a search.
+- `promptIds` — ids from the USERPROMPT entries of `flow_dependencies`.
+
+**Attributing a hang-up to a prompt.** `durationTotals` sums recorded durations
+per language over the prompts *in the order returned*, and `sequence` gives each
+prompt's `startSeconds`. The offsets mean something only if that is the play
+order: use `flowId` alone, or list `promptIds`/`promptNames` in play order.
+Encounter order follows one path through a branching flow, so confirm the path
+against the IR before reading off which prompt was playing N seconds in.
+
+Inline `ToAudioTTS("...")` text and `PromptSystem.<name>` system prompts are not
+user prompts; the former is already in the raw config, the latter is out of scope.
 
 ## Content search: the `search_in_flow` tool
 
