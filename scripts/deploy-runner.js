@@ -128154,16 +128154,80 @@ var import_node_https = __toESM(require("node:https"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_url = require("node:url");
 var import_node_util = require("node:util");
+
+// src/shared/redact.ts
+var MIN_SECRET_LENGTH = 4;
+function createRedactor(secrets) {
+  const byValue = /* @__PURE__ */ new Map();
+  for (const s of secrets) {
+    if (typeof s.value === "string" && s.value.length >= MIN_SECRET_LENGTH && !byValue.has(s.value)) {
+      byValue.set(s.value, s);
+    }
+  }
+  const active = [...byValue.values()].sort(
+    (a, b) => b.value.length - a.value.length
+  );
+  if (active.length === 0) return (text) => text;
+  return (text) => {
+    let out = text;
+    for (const { label, value } of active) {
+      if (out.includes(value)) {
+        out = out.split(value).join(`<redacted:${label}>`);
+      }
+    }
+    return out;
+  };
+}
+function credentialSecrets(clientId, clientSecret) {
+  const secrets = [
+    { label: "client-secret", value: clientSecret },
+    { label: "client-id", value: clientId }
+  ];
+  if (clientSecret !== void 0) {
+    for (const form of encodedForms(clientSecret)) {
+      secrets.push({ label: "client-secret", value: form });
+    }
+  }
+  if (clientId !== void 0 && clientSecret !== void 0) {
+    secrets.push({
+      label: "client-credentials",
+      value: Buffer.from(`${clientId}:${clientSecret}`).toString(
+        "base64"
+      )
+    });
+  }
+  return secrets;
+}
+function encodedForms(value) {
+  return [
+    encodeURIComponent(value),
+    new URLSearchParams({ v: value }).toString().slice(2),
+    JSON.stringify(value).slice(1, -1)
+  ];
+}
+
+// src/deploy-runner/index.ts
 var TIMEOUT_MS = 9e4;
+var redact = createRedactor(
+  credentialSecrets(
+    process.env.GENESYS_CLIENT_ID,
+    process.env.GENESYS_CLIENT_SECRET
+  )
+);
 function emit(type, ...args) {
   if (type === "log") {
     const [level, message] = args;
-    process.stdout.write(`${JSON.stringify({ type, level, message })}
-`);
+    process.stdout.write(
+      `${JSON.stringify({ type, level, message: redact(message) })}
+`
+    );
   } else {
     const [payload] = args;
-    process.stdout.write(`${JSON.stringify({ type, ...payload })}
-`);
+    const error = payload.error === void 0 ? {} : { error: redact(payload.error) };
+    process.stdout.write(
+      `${JSON.stringify({ type, ...payload, ...error })}
+`
+    );
   }
 }
 var httpErrors = [];
@@ -128219,14 +128283,16 @@ import_node_https.default.get = function patchedGet(...args) {
   return origGet.apply(this, args);
 };
 var origConsoleLog = console.log;
+var origConsoleWarn = console.warn;
+var origConsoleError = console.error;
 var tracePrefix = "TRACE:";
 var SUPPRESSED_TRACES = [/Unknown feature being requested/];
-function interceptTrace(text) {
+function interceptTrace(text, level) {
   if (text.startsWith(tracePrefix)) {
     const msg = text.slice(tracePrefix.length).trim();
     if (SUPPRESSED_TRACES.some((p) => p.test(msg))) return true;
     traces.push(msg);
-    emit("log", "info", msg);
+    emit("log", level, msg);
     return true;
   }
   return false;
@@ -128234,20 +128300,45 @@ function interceptTrace(text) {
 console.log = (...args) => {
   const first = args[0];
   if (typeof first === "string") {
-    if (interceptTrace(first)) return;
+    if (interceptTrace(first, "info")) return;
     if (first.startsWith("- ") || first.startsWith("navigator unavailable"))
       return;
   }
   origConsoleLog.apply(console, args);
 };
+console.warn = (...args) => {
+  const first = args[0];
+  if (typeof first === "string" && interceptTrace(first, "warn")) return;
+  origConsoleWarn.apply(console, args);
+};
+console.error = (...args) => {
+  const first = args[0];
+  if (typeof first === "string" && interceptTrace(first, "error")) return;
+  origConsoleError.apply(console, args);
+};
 var origStdoutWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = ((chunk, ...rest) => {
   const str = typeof chunk === "string" ? chunk : String(chunk);
   if (str.startsWith(tracePrefix)) {
-    interceptTrace(str.trimEnd());
+    interceptTrace(str.trimEnd(), "info");
     return true;
   }
-  return origStdoutWrite(chunk, ...rest);
+  return origStdoutWrite(
+    typeof chunk === "string" ? redact(chunk) : chunk,
+    ...rest
+  );
+});
+var origStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = ((chunk, ...rest) => {
+  const str = typeof chunk === "string" ? chunk : String(chunk);
+  if (str.startsWith(tracePrefix)) {
+    interceptTrace(str.trimEnd(), "error");
+    return true;
+  }
+  return origStderrWrite(
+    typeof chunk === "string" ? redact(chunk) : chunk,
+    ...rest
+  );
 });
 var LEVEL_PREFIX = {
   error: "error",
@@ -128256,40 +128347,85 @@ var LEVEL_PREFIX = {
 };
 var publishedFlowId;
 var publishedFlowName;
+var replacedFlowId;
 var publishSucceeded = false;
+var checkInSucceeded = false;
+var sdkVersion;
 var validationIssues = [];
 var inValidationSummary = false;
+var summaryObject;
+var summarySeverities = [];
+var SUMMARY_HEADER_RE = /^\[Type:'ArchValidationIssue'/;
+var SUMMARY_OBJECT_RE = /ArchObject:(\[.*\])\]$/;
+function countIn(header, name) {
+  const match = header.match(new RegExp(`(?:^|[\\s,[])${name}:(\\d+)`));
+  return match ? Number(match[1]) : 0;
+}
+function repeat(severity, count) {
+  return Array.from({ length: count }, () => severity);
+}
+function captureValidationSummary(msg, level) {
+  let consumed = false;
+  for (const line of msg.split("\n")) {
+    if (line.includes("Validation Summary Done")) {
+      inValidationSummary = false;
+      summaryObject = void 0;
+      summarySeverities = [];
+      consumed = true;
+    } else if (line.includes("Validation Summary")) {
+      inValidationSummary = true;
+      consumed = true;
+    } else if (inValidationSummary) {
+      consumed = true;
+      const text = line.trim();
+      if (!text || text === "No validation issues.") continue;
+      if (SUMMARY_HEADER_RE.test(text)) {
+        summaryObject = text.match(SUMMARY_OBJECT_RE)?.[1] ?? text;
+        summarySeverities = [
+          ...repeat("error", countIn(text, "ErrorCount")),
+          ...repeat("warning", countIn(text, "WarningCount")),
+          ...repeat("error", countIn(text, "RollupErrorCount")),
+          ...repeat("warning", countIn(text, "RollupWarningCount"))
+        ];
+        continue;
+      }
+      validationIssues.push({
+        severity: summarySeverities.shift() ?? (level === "error" ? "error" : "warning"),
+        text: summaryObject ? `[${summaryObject}] ${text}` : text
+      });
+    }
+  }
+  return consumed;
+}
 var FLOW_CREATED_RE = /successfully created flow name '(.+?)' \(id: '(.+?)'\)/;
+var FLOW_REPLACED_RE = /successfully posted request to delete the existing flow named '.+?' \(id: '(.+?)'\)/;
+var PUBLISH_SUCCEEDED_RE = /publishAsync - publish successful/;
+var CHECK_IN_SUCCEEDED_RE = /checkInAsync - checked in/;
 function installLogging(scripting) {
   const logging = scripting.services.archLogging;
   logging.setLoggingCallback((logMessage) => {
     const level = logMessage.logType || "info";
     const msg = logMessage.messageParts?.message || logMessage.messageFull || "";
     if (msg.includes("clientSecret:") || msg.includes("auth token"))
-      return false;
+      return true;
     const created = msg.match(FLOW_CREATED_RE);
     if (created) {
       publishedFlowName = created[1];
       publishedFlowId = created[2];
     }
-    if (msg.includes("publish successful")) {
+    const replaced = msg.match(FLOW_REPLACED_RE);
+    if (replaced) {
+      replacedFlowId = replaced[1];
+    }
+    if (PUBLISH_SUCCEEDED_RE.test(msg)) {
       publishSucceeded = true;
     }
-    if (msg.includes("Validation Summary Done")) {
-      inValidationSummary = false;
-    } else if (msg.includes("Validation Summary")) {
-      inValidationSummary = true;
-    } else if (inValidationSummary) {
-      const trimmed = msg.trim();
-      if (trimmed && trimmed !== "No validation issues.") {
-        validationIssues.push(trimmed);
-      }
+    if (CHECK_IN_SUCCEEDED_RE.test(msg)) {
+      checkInSucceeded = true;
     }
-    if (level === "warning" || level === "error") {
-      const mappedLevel = LEVEL_PREFIX[level] || "info";
-      if (mappedLevel === "warn" && !msg.includes("end method is being called")) {
-        validationIssues.push(msg);
-      }
+    const isSummary = captureValidationSummary(msg, level);
+    if (!isSummary && level === "warning" && !msg.includes("end method is being called")) {
+      validationIssues.push({ severity: "warning", text: msg });
     }
     emit("log", LEVEL_PREFIX[level] || "info", msg);
     return false;
@@ -128345,12 +128481,49 @@ function toArchitectSdkRegion(scripting, apiDomain) {
   if (Object.values(locations).includes(apiDomain)) return apiDomain;
   return void 0;
 }
+function validationFromLog() {
+  const texts = (severity) => validationIssues.filter((i) => i.severity === severity).map((i) => i.text);
+  return { errors: texts("error"), warnings: texts("warning") };
+}
+function failure(error) {
+  return {
+    success: false,
+    status: "failed",
+    flowId: publishedFlowId,
+    flowName: publishedFlowName,
+    replacedFlowId,
+    validation: validationFromLog(),
+    sdkVersion,
+    error
+  };
+}
+function successStatus() {
+  if (publishSucceeded) return "published";
+  if (checkInSucceeded) return "checked_in";
+  return "saved";
+}
+function nonEmptyString(value) {
+  return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+function success(flow, validation) {
+  return {
+    success: true,
+    status: successStatus(),
+    // Prefer what the flow object reports; fall back to what the SDK
+    // logged during createAsync, which is all we have when buildFlow()
+    // returns something other than the flow.
+    flowId: nonEmptyString(flow?.id) ?? publishedFlowId,
+    flowName: nonEmptyString(flow?.name) ?? publishedFlowName,
+    flowType: nonEmptyString(flow?.flowType),
+    flowUrl: nonEmptyString(flow?.url),
+    replacedFlowId,
+    validation,
+    sdkVersion
+  };
+}
 async function main() {
   const timer = setTimeout(() => {
-    emit("result", {
-      success: false,
-      error: `Deploy timed out after ${TIMEOUT_MS / 1e3}s`
-    });
+    emit("result", failure(`Deploy timed out after ${TIMEOUT_MS / 1e3}s`));
     process.exit(2);
   }, TIMEOUT_MS);
   timer.unref();
@@ -128362,10 +128535,7 @@ async function main() {
   });
   const flowFile = values["flow-file"];
   if (!flowFile) {
-    emit("result", {
-      success: false,
-      error: "Missing --flow-file argument"
-    });
+    emit("result", failure("Missing --flow-file argument"));
     process.exit(1);
   }
   const absoluteFlowPath = import_node_path.default.resolve(flowFile);
@@ -128373,21 +128543,28 @@ async function main() {
   const clientId = process.env.GENESYS_CLIENT_ID;
   const clientSecret = process.env.GENESYS_CLIENT_SECRET;
   if (!region || !clientId || !clientSecret) {
-    emit("result", {
-      success: false,
-      error: "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET"
-    });
+    emit(
+      "result",
+      failure(
+        "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET"
+      )
+    );
     process.exit(1);
   }
   emit("log", "info", "Loading Architect Scripting SDK...");
   const scripting = require_scripting_bundle();
   installLogging(scripting);
+  sdkVersion = nonEmptyString(
+    scripting.environment.ArchScriptingInfo?.version
+  );
   const sdkRegion = toArchitectSdkRegion(scripting, region);
   if (!sdkRegion) {
-    emit("result", {
-      success: false,
-      error: `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`
-    });
+    emit(
+      "result",
+      failure(
+        `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`
+      )
+    );
     process.exit(1);
   }
   emit("log", "info", `Starting SDK session (region: ${sdkRegion})...`);
@@ -128400,52 +128577,55 @@ async function main() {
     emit("log", "info", `Importing flow file: ${absoluteFlowPath}`);
     const mod = await import((0, import_node_url.pathToFileURL)(absoluteFlowPath).href);
     if (typeof mod.buildFlow !== "function") {
-      emit("result", {
-        success: false,
-        error: `Flow file does not export a buildFlow function: ${absoluteFlowPath}`
-      });
+      emit(
+        "result",
+        failure(
+          `Flow file does not export a buildFlow function: ${absoluteFlowPath}`
+        )
+      );
       return;
     }
     const flowResult = await mod.buildFlow(scripting);
-    let warnings;
+    const knownFlowId = nonEmptyString(flowResult?.id) ?? publishedFlowId;
+    if (!knownFlowId && !publishSucceeded && !checkInSucceeded) {
+      emit(
+        "result",
+        failure(
+          "buildFlow() returned without creating a flow: no flow id was returned or logged by the SDK"
+        )
+      );
+      return;
+    }
+    let validation = { errors: [], warnings: [] };
     if (typeof flowResult?.validateAsync === "function") {
       try {
-        const validation = await flowResult.validateAsync();
-        if (validation.hasErrorsOrWarnings) {
-          warnings = [];
-          for (const issue of validation.issues) {
+        const results = await flowResult.validateAsync();
+        if (results.hasErrorsOrWarnings) {
+          for (const issue of results.issues) {
             const label = issue.archObject?.logStr ?? "Unknown";
             for (const err of issue.errors ?? [])
-              warnings.push(`ERROR [${label}]: ${err}`);
+              validation.errors.push(`[${label}] ${err}`);
             for (const warn of issue.warnings ?? [])
-              warnings.push(`WARN [${label}]: ${warn}`);
+              validation.warnings.push(`[${label}] ${warn}`);
           }
-          for (const w of warnings) emit("log", "warn", w);
+          for (const e of validation.errors)
+            emit("log", "error", `Validation error ${e}`);
+          for (const w of validation.warnings)
+            emit("log", "warn", `Validation warning ${w}`);
         }
       } catch {
-        if (validationIssues.length > 0) {
-          warnings = validationIssues;
-        }
+        validation = validationFromLog();
       }
+    } else {
+      validation = validationFromLog();
     }
-    emit("result", {
-      success: true,
-      flowId: publishedFlowId,
-      flowName: publishedFlowName,
-      warnings
-    });
+    emit("result", success(flowResult, validation));
   } catch (err) {
-    if (publishSucceeded) {
-      const warnings = validationIssues.length > 0 ? validationIssues : void 0;
-      emit("result", {
-        success: true,
-        flowId: publishedFlowId,
-        flowName: publishedFlowName,
-        warnings
-      });
+    if (publishSucceeded || checkInSucceeded) {
+      emit("result", success(void 0, validationFromLog()));
     } else {
       const message = err instanceof Error ? err.message : String(err);
-      emit("result", { success: false, error: message });
+      emit("result", failure(message));
     }
   } finally {
     session.endExitCode = 0;
@@ -128453,10 +128633,12 @@ async function main() {
   }
 }
 main().then(() => process.exit(0)).catch((err) => {
-  emit("result", {
-    success: false,
-    error: `Unhandled error: ${err instanceof Error ? err.message : String(err)}`
-  });
+  emit(
+    "result",
+    failure(
+      `Unhandled error: ${err instanceof Error ? err.message : String(err)}`
+    )
+  );
   process.exit(1);
 });
 /*! Bundled license information:

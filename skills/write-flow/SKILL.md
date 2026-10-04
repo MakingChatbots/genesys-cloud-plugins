@@ -114,11 +114,32 @@ Input: { "flowFile": "./path/to/flow.ts" }
 The tool spawns an isolated process that:
 1. Starts an authenticated SDK session using the plugin's Genesys credentials
 2. Imports the flow file and calls `buildFlow(scripting)`
-3. Returns success/failure with SDK logs
+3. Returns a JSON result describing the outcome
 
-If deployment fails, read the error logs carefully — the SDK has three error channels (logging callback, TRACE lines, HTTP errors) and the deploy runner captures all of them.
+The result is structured, not a log dump:
 
-**Bot flows — publish before testing:** The `deploy_flow` tool checks in the flow but does not publish it. To test a bot flow or digital bot flow with the `test_bot_flow` tool (step 6), the flow must be published first. Replace `flow.checkInAsync()` with `flow.publishAsync()` in the `buildFlow` function — do not call both, because `checkInAsync` releases the lock and `publishAsync` will fail with a 409:
+```json
+{
+  "status": "published",
+  "flowId": "…",
+  "flowName": "…",
+  "flowType": "bot",
+  "flowUrl": "https://apps.…/architect/#/bot/flows/…",
+  "replacedFlowId": "…",
+  "validation": { "errors": [], "warnings": [] },
+  "sdkVersion": "0.69.1",
+  "durationMs": 12345
+}
+```
+
+- `status` is `published`, `checked_in`, `saved` (created but still checked out — the flow file returned without calling `checkInAsync`/`publishAsync`) or `failed`.
+- `replacedFlowId` is the id of a same-name flow the SDK deleted before creating this one (see "Re-creating Existing Flows" in `references/sdk-patterns.md`). When it is set, **the flow id has changed** — use the new `flowId` everywhere from now on. `null` means nothing was replaced.
+- `validation.errors` and `validation.warnings` come from `validateAsync()` on the returned flow. Address errors before testing; warnings are usually safe to leave.
+- The SDK log is omitted on success. Pass `"verbose": true` to include it.
+
+On failure the result starts with `error` (the runner's first error) and `diagnosis` (the SDK's own error lines, which usually name the object and the reason), followed by the same fields and the full `log`. Read `error` and `diagnosis` first; the SDK has three error channels (logging callback, TRACE lines, HTTP errors) and the deploy runner captures all of them into the log.
+
+**Bot flows — publish before testing:** The `deploy_flow` tool checks in the flow but does not publish it (the result's `status` says which happened). To test a bot flow or digital bot flow with the `test_bot_flow` tool (step 6), the flow must be published first. Replace `flow.checkInAsync()` with `flow.publishAsync()` in the `buildFlow` function — do not call both, because `checkInAsync` releases the lock and `publishAsync` will fail with a 409:
 
 ```typescript
 return await flow.publishAsync();
@@ -126,7 +147,7 @@ return await flow.publishAsync();
 
 ### 6. Test (bot flows and digital bot flows)
 
-After deploying and publishing a bot flow or digital bot flow, test it using the `test_bot_flow` MCP tool. The deploy result includes the flow ID.
+After deploying and publishing a bot flow or digital bot flow, test it using the `test_bot_flow` MCP tool with the `flowId` from the deploy result (check that `status` is `published` first).
 
 **Start a session:**
 ```

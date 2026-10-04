@@ -6,29 +6,40 @@ import https from "node:https";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import type {
+    DeployResultPayload,
+    DeployStatus,
+    DeployValidation,
+} from "../shared/deploy-result.ts";
+import { createRedactor, credentialSecrets } from "../shared/redact.ts";
 
 const TIMEOUT_MS = 90_000;
+
+// Built before the SDK is loaded so every output channel below is covered.
+const redact = createRedactor(
+    credentialSecrets(
+        process.env.GENESYS_CLIENT_ID,
+        process.env.GENESYS_CLIENT_SECRET,
+    ),
+);
 
 type LogLevel = "info" | "warn" | "error";
 
 function emit(type: "log", level: LogLevel, message: string): void;
-function emit(
-    type: "result",
-    payload: {
-        success: boolean;
-        flowId?: string;
-        flowName?: string;
-        warnings?: string[];
-        error?: string;
-    },
-): void;
+function emit(type: "result", payload: DeployResultPayload): void;
 function emit(type: string, ...args: unknown[]): void {
     if (type === "log") {
         const [level, message] = args as [LogLevel, string];
-        process.stdout.write(`${JSON.stringify({ type, level, message })}\n`);
+        process.stdout.write(
+            `${JSON.stringify({ type, level, message: redact(message) })}\n`,
+        );
     } else {
-        const [payload] = args as [Record<string, unknown>];
-        process.stdout.write(`${JSON.stringify({ type, ...payload })}\n`);
+        const [payload] = args as [DeployResultPayload];
+        const error =
+            payload.error === undefined ? {} : { error: redact(payload.error) };
+        process.stdout.write(
+            `${JSON.stringify({ type, ...payload, ...error })}\n`,
+        );
     }
 }
 
@@ -105,20 +116,24 @@ const origGet = https.get;
 };
 
 // ── TRACE interceptor ──────────────────────────────────────────────────
-// The SDK writes TRACE: lines directly to console.log and stdout, bypassing
-// the logging callback. These often contain the actual permission error text.
+// The SDK writes TRACE: lines directly to the console, bypassing the logging
+// callback. The severity is carried by the console method it picks
+// (console.error for failures, which often hold the actual permission error
+// text), not by the text, so each interception point passes its own level.
 
 const origConsoleLog = console.log;
+const origConsoleWarn = console.warn;
+const origConsoleError = console.error;
 const tracePrefix = "TRACE:";
 
 const SUPPRESSED_TRACES = [/Unknown feature being requested/];
 
-function interceptTrace(text: string): boolean {
+function interceptTrace(text: string, level: LogLevel): boolean {
     if (text.startsWith(tracePrefix)) {
         const msg = text.slice(tracePrefix.length).trim();
         if (SUPPRESSED_TRACES.some((p) => p.test(msg))) return true;
         traces.push(msg);
-        emit("log", "info", msg);
+        emit("log", level, msg);
         return true;
     }
     return false;
@@ -127,22 +142,55 @@ function interceptTrace(text: string): boolean {
 console.log = (...args: unknown[]) => {
     const first = args[0];
     if (typeof first === "string") {
-        if (interceptTrace(first)) return;
+        if (interceptTrace(first, "info")) return;
         if (first.startsWith("- ") || first.startsWith("navigator unavailable"))
             return;
     }
+    // Console writes through the patched process.stdout.write below, which
+    // redacts, so nothing more is needed here.
     origConsoleLog.apply(console, args);
+};
+
+console.warn = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === "string" && interceptTrace(first, "warn")) return;
+    origConsoleWarn.apply(console, args);
+};
+
+console.error = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === "string" && interceptTrace(first, "error")) return;
+    origConsoleError.apply(console, args);
 };
 
 const origStdoutWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
     const str = typeof chunk === "string" ? chunk : String(chunk);
     if (str.startsWith(tracePrefix)) {
-        interceptTrace(str.trimEnd());
+        interceptTrace(str.trimEnd(), "info");
         return true;
     }
-    return (origStdoutWrite as Function)(chunk, ...rest);
+    return (origStdoutWrite as Function)(
+        typeof chunk === "string" ? redact(chunk) : chunk,
+        ...rest,
+    );
 }) as typeof process.stdout.write;
+
+// Anything that reaches stderr without going through console.warn/error
+// above (e.g. a direct write) is treated as an error; the suppressed-trace
+// list keeps the feature-config notices out of the diagnosis.
+const origStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
+    const str = typeof chunk === "string" ? chunk : String(chunk);
+    if (str.startsWith(tracePrefix)) {
+        interceptTrace(str.trimEnd(), "error");
+        return true;
+    }
+    return (origStderrWrite as Function)(
+        typeof chunk === "string" ? redact(chunk) : chunk,
+        ...rest,
+    );
+}) as typeof process.stderr.write;
 
 // ── SDK logging ────────────────────────────────────────────────────────
 
@@ -165,12 +213,103 @@ interface SdkLogMessage {
 
 let publishedFlowId: string | undefined;
 let publishedFlowName: string | undefined;
+let replacedFlowId: string | undefined;
 let publishSucceeded = false;
-const validationIssues: string[] = [];
+let checkInSucceeded = false;
+let sdkVersion: string | undefined;
+
+interface ValidationIssue {
+    severity: "error" | "warning";
+    text: string;
+}
+
+const validationIssues: ValidationIssue[] = [];
 let inValidationSummary = false;
+/** logStr of the object whose issues are being read, from the last header. */
+let summaryObject: string | undefined;
+/** Severity of each upcoming issue line, derived from the header's counts. */
+let summarySeverities: ValidationIssue["severity"][] = [];
+
+const SUMMARY_HEADER_RE = /^\[Type:'ArchValidationIssue'/;
+const SUMMARY_OBJECT_RE = /ArchObject:(\[.*\])\]$/;
+
+function countIn(header: string, name: string): number {
+    const match = header.match(new RegExp(`(?:^|[\\s,[])${name}:(\\d+)`));
+    return match ? Number(match[1]) : 0;
+}
+
+function repeat(
+    severity: ValidationIssue["severity"],
+    count: number,
+): ValidationIssue["severity"][] {
+    return Array.from({ length: count }, () => severity);
+}
+
+/**
+ * Captures the SDK's validation summary from the log. Current SDKs log it as
+ * one multi-line message (older ones a line per message), laid out as:
+ *
+ *     Validation Summary
+ *       [Type:'ArchValidationIssue', ErrorCount:1, WarningCount:2, ArchObject:[<logStr>]]
+ *     <error text>
+ *     <warning text>
+ *     <warning text>
+ *       - Validation Summary Done
+ *
+ * The issue lines carry no severity marker or indent (the SDK's "Error: " and
+ * "Warning: " prefixes are lost to an operator-precedence slip in its
+ * getSummaryStr), but they follow their header in a fixed order: errors,
+ * warnings, rollup errors, rollup warnings, and the header carries each
+ * count. Issues are prefixed with their object's logStr, matching the
+ * validateAsync() path. Should the counts run out, the level the summary was
+ * logged at decides (error when any issue is an error, warning otherwise).
+ *
+ * Returns true when the message was part of the summary.
+ */
+function captureValidationSummary(msg: string, level: string): boolean {
+    let consumed = false;
+    for (const line of msg.split("\n")) {
+        if (line.includes("Validation Summary Done")) {
+            inValidationSummary = false;
+            summaryObject = undefined;
+            summarySeverities = [];
+            consumed = true;
+        } else if (line.includes("Validation Summary")) {
+            inValidationSummary = true;
+            consumed = true;
+        } else if (inValidationSummary) {
+            consumed = true;
+            const text = line.trim();
+            if (!text || text === "No validation issues.") continue;
+            if (SUMMARY_HEADER_RE.test(text)) {
+                summaryObject = text.match(SUMMARY_OBJECT_RE)?.[1] ?? text;
+                summarySeverities = [
+                    ...repeat("error", countIn(text, "ErrorCount")),
+                    ...repeat("warning", countIn(text, "WarningCount")),
+                    ...repeat("error", countIn(text, "RollupErrorCount")),
+                    ...repeat("warning", countIn(text, "RollupWarningCount")),
+                ];
+                continue;
+            }
+            validationIssues.push({
+                severity:
+                    summarySeverities.shift() ??
+                    (level === "error" ? "error" : "warning"),
+                text: summaryObject ? `[${summaryObject}] ${text}` : text,
+            });
+        }
+    }
+    return consumed;
+}
 
 const FLOW_CREATED_RE =
     /successfully created flow name '(.+?)' \(id: '(.+?)'\)/;
+// Logged by createAsync when it deletes an existing flow of the same name
+// before creating the new one. The id is the one the caller no longer has.
+const FLOW_REPLACED_RE =
+    /successfully posted request to delete the existing flow named '.+?' \(id: '(.+?)'\)/;
+const PUBLISH_SUCCEEDED_RE = /publishAsync - publish successful/;
+const CHECK_IN_SUCCEEDED_RE = /checkInAsync - checked in/;
 
 function installLogging(scripting: ArchitectScripting): void {
     const logging = scripting.services.archLogging;
@@ -178,37 +317,34 @@ function installLogging(scripting: ArchitectScripting): void {
         const level = logMessage.logType || "info";
         const msg =
             logMessage.messageParts?.message || logMessage.messageFull || "";
+        // Returning true tells the SDK the line was handled, so it does not
+        // echo it to the console itself; false would print the credential.
         if (msg.includes("clientSecret:") || msg.includes("auth token"))
-            return false;
+            return true;
 
         const created = msg.match(FLOW_CREATED_RE);
         if (created) {
             publishedFlowName = created[1];
             publishedFlowId = created[2];
         }
-        if (msg.includes("publish successful")) {
+        const replaced = msg.match(FLOW_REPLACED_RE);
+        if (replaced) {
+            replacedFlowId = replaced[1];
+        }
+        if (PUBLISH_SUCCEEDED_RE.test(msg)) {
             publishSucceeded = true;
         }
-
-        if (msg.includes("Validation Summary Done")) {
-            inValidationSummary = false;
-        } else if (msg.includes("Validation Summary")) {
-            inValidationSummary = true;
-        } else if (inValidationSummary) {
-            const trimmed = msg.trim();
-            if (trimmed && trimmed !== "No validation issues.") {
-                validationIssues.push(trimmed);
-            }
+        if (CHECK_IN_SUCCEEDED_RE.test(msg)) {
+            checkInSucceeded = true;
         }
 
-        if (level === "warning" || level === "error") {
-            const mappedLevel = LEVEL_PREFIX[level] || "info";
-            if (
-                mappedLevel === "warn" &&
-                !msg.includes("end method is being called")
-            ) {
-                validationIssues.push(msg);
-            }
+        const isSummary = captureValidationSummary(msg, level);
+        if (
+            !isSummary &&
+            level === "warning" &&
+            !msg.includes("end method is being called")
+        ) {
+            validationIssues.push({ severity: "warning", text: msg });
         }
 
         emit("log", LEVEL_PREFIX[level] || "info", msg);
@@ -294,14 +430,77 @@ function toArchitectSdkRegion(
     return undefined;
 }
 
+// ── Result assembly ───────────────────────────────────────────────────
+
+/** Validation issues captured from the SDK log, split by severity. */
+function validationFromLog(): DeployValidation {
+    const texts = (severity: ValidationIssue["severity"]) =>
+        validationIssues
+            .filter((i) => i.severity === severity)
+            .map((i) => i.text);
+    return { errors: texts("error"), warnings: texts("warning") };
+}
+
+function failure(error: string): DeployResultPayload {
+    return {
+        success: false,
+        status: "failed",
+        flowId: publishedFlowId,
+        flowName: publishedFlowName,
+        replacedFlowId,
+        validation: validationFromLog(),
+        sdkVersion,
+        error,
+    };
+}
+
+function successStatus(): DeployStatus {
+    if (publishSucceeded) return "published";
+    if (checkInSucceeded) return "checked_in";
+    return "saved";
+}
+
+/** Shape of the object the flow file's buildFlow() resolves to when it returns
+ *  the result of checkInAsync()/publishAsync()/saveAsync(), all of which
+ *  resolve to the flow itself. Everything is optional because a flow file
+ *  may return anything. */
+interface FlowLike {
+    id?: unknown;
+    name?: unknown;
+    flowType?: unknown;
+    url?: unknown;
+    validateAsync?: unknown;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function success(
+    flow: FlowLike | undefined,
+    validation: DeployValidation,
+): DeployResultPayload {
+    return {
+        success: true,
+        status: successStatus(),
+        // Prefer what the flow object reports; fall back to what the SDK
+        // logged during createAsync, which is all we have when buildFlow()
+        // returns something other than the flow.
+        flowId: nonEmptyString(flow?.id) ?? publishedFlowId,
+        flowName: nonEmptyString(flow?.name) ?? publishedFlowName,
+        flowType: nonEmptyString(flow?.flowType),
+        flowUrl: nonEmptyString(flow?.url),
+        replacedFlowId,
+        validation,
+        sdkVersion,
+    };
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
     const timer = setTimeout(() => {
-        emit("result", {
-            success: false,
-            error: `Deploy timed out after ${TIMEOUT_MS / 1000}s`,
-        });
+        emit("result", failure(`Deploy timed out after ${TIMEOUT_MS / 1000}s`));
         process.exit(2);
     }, TIMEOUT_MS);
     timer.unref();
@@ -316,10 +515,7 @@ async function main(): Promise<void> {
     const flowFile = values["flow-file"];
 
     if (!flowFile) {
-        emit("result", {
-            success: false,
-            error: "Missing --flow-file argument",
-        });
+        emit("result", failure("Missing --flow-file argument"));
         process.exit(1);
     }
 
@@ -330,10 +526,12 @@ async function main(): Promise<void> {
     const clientSecret = process.env.GENESYS_CLIENT_SECRET;
 
     if (!region || !clientId || !clientSecret) {
-        emit("result", {
-            success: false,
-            error: "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET",
-        });
+        emit(
+            "result",
+            failure(
+                "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET",
+            ),
+        );
         process.exit(1);
     }
 
@@ -341,13 +539,18 @@ async function main(): Promise<void> {
     const scripting: ArchitectScripting = require("purecloud-flow-scripting-api-sdk-javascript");
 
     installLogging(scripting);
+    sdkVersion = nonEmptyString(
+        scripting.environment.ArchScriptingInfo?.version,
+    );
 
     const sdkRegion = toArchitectSdkRegion(scripting, region);
     if (!sdkRegion) {
-        emit("result", {
-            success: false,
-            error: `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`,
-        });
+        emit(
+            "result",
+            failure(
+                `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`,
+            ),
+        );
         process.exit(1);
     }
 
@@ -364,56 +567,64 @@ async function main(): Promise<void> {
         const mod = await import(pathToFileURL(absoluteFlowPath).href);
 
         if (typeof mod.buildFlow !== "function") {
-            emit("result", {
-                success: false,
-                error: `Flow file does not export a buildFlow function: ${absoluteFlowPath}`,
-            });
+            emit(
+                "result",
+                failure(
+                    `Flow file does not export a buildFlow function: ${absoluteFlowPath}`,
+                ),
+            );
             return;
         }
 
-        const flowResult = await mod.buildFlow(scripting);
+        const flowResult: FlowLike | undefined = await mod.buildFlow(scripting);
 
-        let warnings: string[] | undefined;
-        if (typeof flowResult?.validateAsync === "function") {
-            try {
-                const validation = await flowResult.validateAsync();
-                if (validation.hasErrorsOrWarnings) {
-                    warnings = [];
-                    for (const issue of validation.issues) {
-                        const label = issue.archObject?.logStr ?? "Unknown";
-                        for (const err of issue.errors ?? [])
-                            warnings.push(`ERROR [${label}]: ${err}`);
-                        for (const warn of issue.warnings ?? [])
-                            warnings.push(`WARN [${label}]: ${warn}`);
-                    }
-                    for (const w of warnings) emit("log", "warn", w);
-                }
-            } catch {
-                if (validationIssues.length > 0) {
-                    warnings = validationIssues;
-                }
-            }
+        // "saved" promises the flow exists. Without an id from the returned
+        // object or the SDK's create log, and no check-in or publish seen,
+        // nothing was created and reporting success would mislead.
+        const knownFlowId = nonEmptyString(flowResult?.id) ?? publishedFlowId;
+        if (!knownFlowId && !publishSucceeded && !checkInSucceeded) {
+            emit(
+                "result",
+                failure(
+                    "buildFlow() returned without creating a flow: no flow id was returned or logged by the SDK",
+                ),
+            );
+            return;
         }
 
-        emit("result", {
-            success: true,
-            flowId: publishedFlowId,
-            flowName: publishedFlowName,
-            warnings,
-        });
+        let validation: DeployValidation = { errors: [], warnings: [] };
+        if (typeof flowResult?.validateAsync === "function") {
+            try {
+                const results = await flowResult.validateAsync();
+                if (results.hasErrorsOrWarnings) {
+                    for (const issue of results.issues) {
+                        const label = issue.archObject?.logStr ?? "Unknown";
+                        for (const err of issue.errors ?? [])
+                            validation.errors.push(`[${label}] ${err}`);
+                        for (const warn of issue.warnings ?? [])
+                            validation.warnings.push(`[${label}] ${warn}`);
+                    }
+                    for (const e of validation.errors)
+                        emit("log", "error", `Validation error ${e}`);
+                    for (const w of validation.warnings)
+                        emit("log", "warn", `Validation warning ${w}`);
+                }
+            } catch {
+                validation = validationFromLog();
+            }
+        } else {
+            validation = validationFromLog();
+        }
+
+        emit("result", success(flowResult, validation));
     } catch (err) {
-        if (publishSucceeded) {
-            const warnings =
-                validationIssues.length > 0 ? validationIssues : undefined;
-            emit("result", {
-                success: true,
-                flowId: publishedFlowId,
-                flowName: publishedFlowName,
-                warnings,
-            });
+        if (publishSucceeded || checkInSucceeded) {
+            // The publish or check-in itself went through; whatever threw
+            // afterwards (typically the searchability poll) does not undo it.
+            emit("result", success(undefined, validationFromLog()));
         } else {
             const message = err instanceof Error ? err.message : String(err);
-            emit("result", { success: false, error: message });
+            emit("result", failure(message));
         }
     } finally {
         session.endExitCode = 0;
@@ -424,9 +635,11 @@ async function main(): Promise<void> {
 main()
     .then(() => process.exit(0))
     .catch((err) => {
-        emit("result", {
-            success: false,
-            error: `Unhandled error: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        emit(
+            "result",
+            failure(
+                `Unhandled error: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+        );
         process.exit(1);
     });
