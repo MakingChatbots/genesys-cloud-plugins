@@ -225,23 +225,44 @@ interface ValidationIssue {
 
 const validationIssues: ValidationIssue[] = [];
 let inValidationSummary = false;
-let summaryHeaderIndent: number | undefined;
-let summaryHeader: string | undefined;
+/** logStr of the object whose issues are being read, from the last header. */
+let summaryObject: string | undefined;
+/** Severity of each upcoming issue line, derived from the header's counts. */
+let summarySeverities: ValidationIssue["severity"][] = [];
+
+const SUMMARY_HEADER_RE = /^\[Type:'ArchValidationIssue'/;
+const SUMMARY_OBJECT_RE = /ArchObject:(\[.*\])\]$/;
+
+function countIn(header: string, name: string): number {
+    const match = header.match(new RegExp(`(?:^|[\\s,[])${name}:(\\d+)`));
+    return match ? Number(match[1]) : 0;
+}
+
+function repeat(
+    severity: ValidationIssue["severity"],
+    count: number,
+): ValidationIssue["severity"][] {
+    return Array.from({ length: count }, () => severity);
+}
 
 /**
  * Captures the SDK's validation summary from the log. Current SDKs log it as
  * one multi-line message (older ones a line per message), laid out as:
  *
  *     Validation Summary
- *       <object logStr>
- *         <issue text>
+ *       [Type:'ArchValidationIssue', ErrorCount:1, WarningCount:2, ArchObject:[<logStr>]]
+ *     <error text>
+ *     <warning text>
+ *     <warning text>
  *       - Validation Summary Done
  *
- * The issue lines carry no severity marker (the SDK's "Error: "/"Warning: "
- * prefixes are lost to an operator-precedence slip in its getSummaryStr), so
- * the level the summary is logged at is the only severity signal: error when
- * any issue is an error, warning otherwise. Issues are prefixed with their
- * object's logStr, matching the validateAsync() path.
+ * The issue lines carry no severity marker or indent (the SDK's "Error: " and
+ * "Warning: " prefixes are lost to an operator-precedence slip in its
+ * getSummaryStr), but they follow their header in a fixed order: errors,
+ * warnings, rollup errors, rollup warnings, and the header carries each
+ * count. Issues are prefixed with their object's logStr, matching the
+ * validateAsync() path. Should the counts run out, the level the summary was
+ * logged at decides (error when any issue is an error, warning otherwise).
  *
  * Returns true when the message was part of the summary.
  */
@@ -250,8 +271,8 @@ function captureValidationSummary(msg: string, level: string): boolean {
     for (const line of msg.split("\n")) {
         if (line.includes("Validation Summary Done")) {
             inValidationSummary = false;
-            summaryHeaderIndent = undefined;
-            summaryHeader = undefined;
+            summaryObject = undefined;
+            summarySeverities = [];
             consumed = true;
         } else if (line.includes("Validation Summary")) {
             inValidationSummary = true;
@@ -260,18 +281,21 @@ function captureValidationSummary(msg: string, level: string): boolean {
             consumed = true;
             const text = line.trim();
             if (!text || text === "No validation issues.") continue;
-            const indent = line.length - line.trimStart().length;
-            if (
-                summaryHeaderIndent === undefined ||
-                indent <= summaryHeaderIndent
-            ) {
-                summaryHeaderIndent = indent;
-                summaryHeader = text;
+            if (SUMMARY_HEADER_RE.test(text)) {
+                summaryObject = text.match(SUMMARY_OBJECT_RE)?.[1] ?? text;
+                summarySeverities = [
+                    ...repeat("error", countIn(text, "ErrorCount")),
+                    ...repeat("warning", countIn(text, "WarningCount")),
+                    ...repeat("error", countIn(text, "RollupErrorCount")),
+                    ...repeat("warning", countIn(text, "RollupWarningCount")),
+                ];
                 continue;
             }
             validationIssues.push({
-                severity: level === "error" ? "error" : "warning",
-                text: summaryHeader ? `[${summaryHeader}] ${text}` : text,
+                severity:
+                    summarySeverities.shift() ??
+                    (level === "error" ? "error" : "warning"),
+                text: summaryObject ? `[${summaryObject}] ${text}` : text,
             });
         }
     }

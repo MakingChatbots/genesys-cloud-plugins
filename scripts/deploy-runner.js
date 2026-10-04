@@ -128353,15 +128353,24 @@ var checkInSucceeded = false;
 var sdkVersion;
 var validationIssues = [];
 var inValidationSummary = false;
-var summaryHeaderIndent;
-var summaryHeader;
+var summaryObject;
+var summarySeverities = [];
+var SUMMARY_HEADER_RE = /^\[Type:'ArchValidationIssue'/;
+var SUMMARY_OBJECT_RE = /ArchObject:(\[.*\])\]$/;
+function countIn(header, name) {
+  const match = header.match(new RegExp(`(?:^|[\\s,[])${name}:(\\d+)`));
+  return match ? Number(match[1]) : 0;
+}
+function repeat(severity, count) {
+  return Array.from({ length: count }, () => severity);
+}
 function captureValidationSummary(msg, level) {
   let consumed = false;
   for (const line of msg.split("\n")) {
     if (line.includes("Validation Summary Done")) {
       inValidationSummary = false;
-      summaryHeaderIndent = void 0;
-      summaryHeader = void 0;
+      summaryObject = void 0;
+      summarySeverities = [];
       consumed = true;
     } else if (line.includes("Validation Summary")) {
       inValidationSummary = true;
@@ -128370,15 +128379,19 @@ function captureValidationSummary(msg, level) {
       consumed = true;
       const text = line.trim();
       if (!text || text === "No validation issues.") continue;
-      const indent = line.length - line.trimStart().length;
-      if (summaryHeaderIndent === void 0 || indent <= summaryHeaderIndent) {
-        summaryHeaderIndent = indent;
-        summaryHeader = text;
+      if (SUMMARY_HEADER_RE.test(text)) {
+        summaryObject = text.match(SUMMARY_OBJECT_RE)?.[1] ?? text;
+        summarySeverities = [
+          ...repeat("error", countIn(text, "ErrorCount")),
+          ...repeat("warning", countIn(text, "WarningCount")),
+          ...repeat("error", countIn(text, "RollupErrorCount")),
+          ...repeat("warning", countIn(text, "RollupWarningCount"))
+        ];
         continue;
       }
       validationIssues.push({
-        severity: level === "error" ? "error" : "warning",
-        text: summaryHeader ? `[${summaryHeader}] ${text}` : text
+        severity: summarySeverities.shift() ?? (level === "error" ? "error" : "warning"),
+        text: summaryObject ? `[${summaryObject}] ${text}` : text
       });
     }
   }
