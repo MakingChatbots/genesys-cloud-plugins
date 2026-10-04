@@ -6,40 +6,24 @@ import https from "node:https";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { createRedactor } from "../shared/redact.ts";
+import type {
+    DeployResultPayload,
+    DeployStatus,
+    DeployValidation,
+} from "../shared/deploy-result.ts";
+import { createRedactor, credentialSecrets } from "../shared/redact.ts";
 
 const TIMEOUT_MS = 90_000;
 
 // Built before the SDK is loaded so every output channel below is covered.
-const redact = createRedactor([
-    { label: "client-secret", value: process.env.GENESYS_CLIENT_SECRET },
-    { label: "client-id", value: process.env.GENESYS_CLIENT_ID },
-]);
+const redact = createRedactor(
+    credentialSecrets(
+        process.env.GENESYS_CLIENT_ID,
+        process.env.GENESYS_CLIENT_SECRET,
+    ),
+);
 
 type LogLevel = "info" | "warn" | "error";
-
-/** How far the flow got. `published` and `checked_in` are both unlocked; `saved` means the flow exists but is still checked out. */
-export type DeployStatus = "published" | "checked_in" | "saved" | "failed";
-
-export interface DeployValidation {
-    errors: string[];
-    warnings: string[];
-}
-
-/** The single `{type:"result"}` line the runner writes to stdout for the MCP server. */
-export interface DeployResultPayload {
-    success: boolean;
-    status: DeployStatus;
-    flowId?: string;
-    flowName?: string;
-    flowType?: string;
-    flowUrl?: string;
-    /** Id of a same-name flow the SDK deleted before creating this one. */
-    replacedFlowId?: string;
-    validation: DeployValidation;
-    sdkVersion?: string;
-    error?: string;
-}
 
 function emit(type: "log", level: LogLevel, message: string): void;
 function emit(type: "result", payload: DeployResultPayload): void;
@@ -132,20 +116,24 @@ const origGet = https.get;
 };
 
 // ── TRACE interceptor ──────────────────────────────────────────────────
-// The SDK writes TRACE: lines directly to console.log and stdout, bypassing
-// the logging callback. These often contain the actual permission error text.
+// The SDK writes TRACE: lines directly to the console, bypassing the logging
+// callback. The severity is carried by the console method it picks
+// (console.error for failures, which often hold the actual permission error
+// text), not by the text, so each interception point passes its own level.
 
 const origConsoleLog = console.log;
+const origConsoleWarn = console.warn;
+const origConsoleError = console.error;
 const tracePrefix = "TRACE:";
 
 const SUPPRESSED_TRACES = [/Unknown feature being requested/];
 
-function interceptTrace(text: string): boolean {
+function interceptTrace(text: string, level: LogLevel): boolean {
     if (text.startsWith(tracePrefix)) {
         const msg = text.slice(tracePrefix.length).trim();
         if (SUPPRESSED_TRACES.some((p) => p.test(msg))) return true;
         traces.push(msg);
-        emit("log", "info", msg);
+        emit("log", level, msg);
         return true;
     }
     return false;
@@ -154,21 +142,32 @@ function interceptTrace(text: string): boolean {
 console.log = (...args: unknown[]) => {
     const first = args[0];
     if (typeof first === "string") {
-        if (interceptTrace(first)) return;
+        if (interceptTrace(first, "info")) return;
         if (first.startsWith("- ") || first.startsWith("navigator unavailable"))
             return;
     }
-    origConsoleLog.apply(
-        console,
-        args.map((a) => (typeof a === "string" ? redact(a) : a)),
-    );
+    // Console writes through the patched process.stdout.write below, which
+    // redacts, so nothing more is needed here.
+    origConsoleLog.apply(console, args);
+};
+
+console.warn = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === "string" && interceptTrace(first, "warn")) return;
+    origConsoleWarn.apply(console, args);
+};
+
+console.error = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === "string" && interceptTrace(first, "error")) return;
+    origConsoleError.apply(console, args);
 };
 
 const origStdoutWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
     const str = typeof chunk === "string" ? chunk : String(chunk);
     if (str.startsWith(tracePrefix)) {
-        interceptTrace(str.trimEnd());
+        interceptTrace(str.trimEnd(), "info");
         return true;
     }
     return (origStdoutWrite as Function)(
@@ -177,13 +176,14 @@ process.stdout.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
     );
 }) as typeof process.stdout.write;
 
-// Some TRACE lines (e.g. feature-config notices) go to stderr. Left there,
-// the MCP server would read them as errors and surface them as diagnosis.
+// Anything that reaches stderr without going through console.warn/error
+// above (e.g. a direct write) is treated as an error; the suppressed-trace
+// list keeps the feature-config notices out of the diagnosis.
 const origStderrWrite = process.stderr.write.bind(process.stderr);
 process.stderr.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
     const str = typeof chunk === "string" ? chunk : String(chunk);
     if (str.startsWith(tracePrefix)) {
-        interceptTrace(str.trimEnd());
+        interceptTrace(str.trimEnd(), "error");
         return true;
     }
     return (origStderrWrite as Function)(
@@ -217,8 +217,66 @@ let replacedFlowId: string | undefined;
 let publishSucceeded = false;
 let checkInSucceeded = false;
 let sdkVersion: string | undefined;
-const validationIssues: string[] = [];
+
+interface ValidationIssue {
+    severity: "error" | "warning";
+    text: string;
+}
+
+const validationIssues: ValidationIssue[] = [];
 let inValidationSummary = false;
+let summaryHeaderIndent: number | undefined;
+let summaryHeader: string | undefined;
+
+/**
+ * Captures the SDK's validation summary from the log. Current SDKs log it as
+ * one multi-line message (older ones a line per message), laid out as:
+ *
+ *     Validation Summary
+ *       <object logStr>
+ *         <issue text>
+ *       - Validation Summary Done
+ *
+ * The issue lines carry no severity marker (the SDK's "Error: "/"Warning: "
+ * prefixes are lost to an operator-precedence slip in its getSummaryStr), so
+ * the level the summary is logged at is the only severity signal: error when
+ * any issue is an error, warning otherwise. Issues are prefixed with their
+ * object's logStr, matching the validateAsync() path.
+ *
+ * Returns true when the message was part of the summary.
+ */
+function captureValidationSummary(msg: string, level: string): boolean {
+    let consumed = false;
+    for (const line of msg.split("\n")) {
+        if (line.includes("Validation Summary Done")) {
+            inValidationSummary = false;
+            summaryHeaderIndent = undefined;
+            summaryHeader = undefined;
+            consumed = true;
+        } else if (line.includes("Validation Summary")) {
+            inValidationSummary = true;
+            consumed = true;
+        } else if (inValidationSummary) {
+            consumed = true;
+            const text = line.trim();
+            if (!text || text === "No validation issues.") continue;
+            const indent = line.length - line.trimStart().length;
+            if (
+                summaryHeaderIndent === undefined ||
+                indent <= summaryHeaderIndent
+            ) {
+                summaryHeaderIndent = indent;
+                summaryHeader = text;
+                continue;
+            }
+            validationIssues.push({
+                severity: level === "error" ? "error" : "warning",
+                text: summaryHeader ? `[${summaryHeader}] ${text}` : text,
+            });
+        }
+    }
+    return consumed;
+}
 
 const FLOW_CREATED_RE =
     /successfully created flow name '(.+?)' \(id: '(.+?)'\)/;
@@ -235,8 +293,10 @@ function installLogging(scripting: ArchitectScripting): void {
         const level = logMessage.logType || "info";
         const msg =
             logMessage.messageParts?.message || logMessage.messageFull || "";
+        // Returning true tells the SDK the line was handled, so it does not
+        // echo it to the console itself; false would print the credential.
         if (msg.includes("clientSecret:") || msg.includes("auth token"))
-            return false;
+            return true;
 
         const created = msg.match(FLOW_CREATED_RE);
         if (created) {
@@ -254,25 +314,13 @@ function installLogging(scripting: ArchitectScripting): void {
             checkInSucceeded = true;
         }
 
-        if (msg.includes("Validation Summary Done")) {
-            inValidationSummary = false;
-        } else if (msg.includes("Validation Summary")) {
-            inValidationSummary = true;
-        } else if (inValidationSummary) {
-            const trimmed = msg.trim();
-            if (trimmed && trimmed !== "No validation issues.") {
-                validationIssues.push(trimmed);
-            }
-        }
-
-        if (level === "warning" || level === "error") {
-            const mappedLevel = LEVEL_PREFIX[level] || "info";
-            if (
-                mappedLevel === "warn" &&
-                !msg.includes("end method is being called")
-            ) {
-                validationIssues.push(msg);
-            }
+        const isSummary = captureValidationSummary(msg, level);
+        if (
+            !isSummary &&
+            level === "warning" &&
+            !msg.includes("end method is being called")
+        ) {
+            validationIssues.push({ severity: "warning", text: msg });
         }
 
         emit("log", LEVEL_PREFIX[level] || "info", msg);
@@ -360,16 +408,13 @@ function toArchitectSdkRegion(
 
 // ── Result assembly ───────────────────────────────────────────────────
 
-/** Validation issues captured from the SDK log, split by severity. Issues the
- *  SDK's summary leaves unlabelled are reported as warnings. */
+/** Validation issues captured from the SDK log, split by severity. */
 function validationFromLog(): DeployValidation {
-    const errors: string[] = [];
-    const warnings: string[] = [];
-    for (const issue of validationIssues) {
-        if (/^error\b/i.test(issue)) errors.push(issue);
-        else warnings.push(issue);
-    }
-    return { errors, warnings };
+    const texts = (severity: ValidationIssue["severity"]) =>
+        validationIssues
+            .filter((i) => i.severity === severity)
+            .map((i) => i.text);
+    return { errors: texts("error"), warnings: texts("warning") };
 }
 
 function failure(error: string): DeployResultPayload {
@@ -509,6 +554,20 @@ async function main(): Promise<void> {
 
         const flowResult: FlowLike | undefined = await mod.buildFlow(scripting);
 
+        // "saved" promises the flow exists. Without an id from the returned
+        // object or the SDK's create log, and no check-in or publish seen,
+        // nothing was created and reporting success would mislead.
+        const knownFlowId = nonEmptyString(flowResult?.id) ?? publishedFlowId;
+        if (!knownFlowId && !publishSucceeded && !checkInSucceeded) {
+            emit(
+                "result",
+                failure(
+                    "buildFlow() returned without creating a flow: no flow id was returned or logged by the SDK",
+                ),
+            );
+            return;
+        }
+
         let validation: DeployValidation = { errors: [], warnings: [] };
         if (typeof flowResult?.validateAsync === "function") {
             try {
@@ -535,9 +594,9 @@ async function main(): Promise<void> {
 
         emit("result", success(flowResult, validation));
     } catch (err) {
-        if (publishSucceeded) {
-            // The publish itself went through; whatever threw afterwards
-            // (typically the post-publish searchability poll) does not undo it.
+        if (publishSucceeded || checkInSucceeded) {
+            // The publish or check-in itself went through; whatever threw
+            // afterwards (typically the searchability poll) does not undo it.
             emit("result", success(undefined, validationFromLog()));
         } else {
             const message = err instanceof Error ? err.message : String(err);

@@ -2,17 +2,13 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod/v3";
-import { createRedactor } from "../../shared/redact.ts";
+import type {
+    DeployResultPayload,
+    DeployStatus,
+    DeployValidation,
+} from "../../shared/deploy-result.ts";
+import { createRedactor, credentialSecrets } from "../../shared/redact.ts";
 import type { ToolFactory } from "./types.ts";
-
-/** How far the flow got. `published` and `checked_in` are both unlocked;
- *  `saved` means the flow exists but is still checked out. */
-type DeployStatus = "published" | "checked_in" | "saved" | "failed";
-
-interface DeployValidation {
-    errors: string[];
-    warnings: string[];
-}
 
 interface RunnerLogLine {
     type: "log";
@@ -20,20 +16,7 @@ interface RunnerLogLine {
     message?: string;
 }
 
-/** Mirrors DeployResultPayload in src/deploy-runner/index.ts. */
-interface RunnerResultLine {
-    type: "result";
-    success: boolean;
-    status?: DeployStatus;
-    flowId?: string;
-    flowName?: string;
-    flowType?: string;
-    flowUrl?: string;
-    replacedFlowId?: string;
-    validation?: DeployValidation;
-    sdkVersion?: string;
-    error?: string;
-}
+type RunnerResultLine = DeployResultPayload & { type: "result" };
 
 type RunnerLine = RunnerLogLine | RunnerResultLine;
 
@@ -87,6 +70,10 @@ const inputSchema = {
         ),
 };
 
+function emptyValidation(): DeployValidation {
+    return { errors: [], warnings: [] };
+}
+
 function formatLog(logs: readonly LogEntry[]): string[] {
     return logs.map((l) => `[${l.level}] ${l.message}`);
 }
@@ -126,7 +113,7 @@ function buildResult({
         flowType: runnerResult?.flowType ?? null,
         flowUrl: runnerResult?.flowUrl ?? null,
         replacedFlowId: runnerResult?.replacedFlowId ?? null,
-        validation: runnerResult?.validation ?? { errors: [], warnings: [] },
+        validation: runnerResult?.validation ?? emptyValidation(),
         sdkVersion: runnerResult?.sdkVersion ?? null,
         durationMs: Date.now() - startedAt,
     };
@@ -143,7 +130,7 @@ function buildResult({
     }
 
     return {
-        status: runnerResult.status ?? "saved",
+        status: runnerResult.status,
         ...facts,
         ...(verbose ? { log: formatLog(logs) } : {}),
     };
@@ -175,10 +162,9 @@ export const deployFlow: ToolFactory<DeployFlowConfig, typeof inputSchema> = (
     handler: async ({ flowFile, verbose = false }) => {
         const startedAt = Date.now();
         // The runner redacts its own output; this catches anything it missed.
-        const redact = createRedactor([
-            { label: "client-secret", value: toolConfig.clientSecret },
-            { label: "client-id", value: toolConfig.clientId },
-        ]);
+        const redact = createRedactor(
+            credentialSecrets(toolConfig.clientId, toolConfig.clientSecret),
+        );
         const absolutePath = path.resolve(flowFile);
         if (!fs.existsSync(absolutePath)) {
             return {
@@ -276,8 +262,34 @@ export const deployFlow: ToolFactory<DeployFlowConfig, typeof inputSchema> = (
                     }),
                 );
 
+            let stderrBuf = "";
+            child.stderr.on("data", (chunk: Buffer) => {
+                stderrBuf += chunk.toString();
+            });
+
+            // stderr is where an import failure or uncaught exception lands,
+            // so it belongs in the diagnosis whichever path settles the
+            // result. Node's own url.parse() deprecation warning is noise
+            // from the SDK's dependencies, not a deploy problem.
+            const flushStderr = () => {
+                const filtered = stderrBuf
+                    .split("\n")
+                    .filter(
+                        (l) =>
+                            !l.includes("url.parse()") &&
+                            !l.includes("[DEP0169]"),
+                    )
+                    .join("\n")
+                    .trim();
+                stderrBuf = "";
+                if (filtered) {
+                    logs.push({ level: "error", message: redact(filtered) });
+                }
+            };
+
             const timer = setTimeout(() => {
                 child.kill("SIGTERM");
+                flushStderr();
                 // A hang after the result line is session teardown, not a
                 // failed deploy; keep the outcome the runner reported.
                 if (resultLine?.success) succeed();
@@ -299,33 +311,9 @@ export const deployFlow: ToolFactory<DeployFlowConfig, typeof inputSchema> = (
                 for (const line of lines) ingest(line);
             });
 
-            let stderrBuf = "";
-            child.stderr.on("data", (chunk: Buffer) => {
-                stderrBuf += chunk.toString();
-            });
-
             child.on("close", (code) => {
                 ingest(stdoutBuf.trim());
-
-                // Node's own url.parse() deprecation warning is noise from the
-                // SDK's dependencies, not a deploy problem.
-                const filteredStderr = stderrBuf
-                    .split("\n")
-                    .filter(
-                        (l) =>
-                            !l.includes("url.parse()") &&
-                            !l.includes("[DEP0169]"),
-                    )
-                    .join("\n")
-                    .trim();
-                if (filteredStderr) {
-                    // stderr is where an import failure or uncaught exception
-                    // lands, so it belongs in the diagnosis.
-                    logs.push({
-                        level: "error",
-                        message: redact(filteredStderr),
-                    });
-                }
+                flushStderr();
 
                 if (resultLine?.success) succeed();
                 else

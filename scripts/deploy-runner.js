@@ -41,7 +41,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // require("./**/*") in node_modules/.pnpm/purecloud-flow-scripting-api-sdk-javascript@0.69.1/node_modules/purecloud-flow-scripting-api-sdk-javascript/build-scripting/release/scripting.bundle.js
 var globRequire;
@@ -128151,8 +128150,6 @@ up tokens before clients start, and update them on any change.
 });
 
 // src/deploy-runner/index.ts
-var index_exports = {};
-module.exports = __toCommonJS(index_exports);
 var import_node_https = __toESM(require("node:https"));
 var import_node_path = __toESM(require("node:path"));
 var import_node_url = require("node:url");
@@ -128161,9 +128158,15 @@ var import_node_util = require("node:util");
 // src/shared/redact.ts
 var MIN_SECRET_LENGTH = 4;
 function createRedactor(secrets) {
-  const active = secrets.filter(
-    (s) => typeof s.value === "string" && s.value.length >= MIN_SECRET_LENGTH
-  ).sort((a, b) => b.value.length - a.value.length);
+  const byValue = /* @__PURE__ */ new Map();
+  for (const s of secrets) {
+    if (typeof s.value === "string" && s.value.length >= MIN_SECRET_LENGTH && !byValue.has(s.value)) {
+      byValue.set(s.value, s);
+    }
+  }
+  const active = [...byValue.values()].sort(
+    (a, b) => b.value.length - a.value.length
+  );
   if (active.length === 0) return (text) => text;
   return (text) => {
     let out = text;
@@ -128175,13 +128178,42 @@ function createRedactor(secrets) {
     return out;
   };
 }
+function credentialSecrets(clientId, clientSecret) {
+  const secrets = [
+    { label: "client-secret", value: clientSecret },
+    { label: "client-id", value: clientId }
+  ];
+  if (clientSecret !== void 0) {
+    for (const form of encodedForms(clientSecret)) {
+      secrets.push({ label: "client-secret", value: form });
+    }
+  }
+  if (clientId !== void 0 && clientSecret !== void 0) {
+    secrets.push({
+      label: "client-credentials",
+      value: Buffer.from(`${clientId}:${clientSecret}`).toString(
+        "base64"
+      )
+    });
+  }
+  return secrets;
+}
+function encodedForms(value) {
+  return [
+    encodeURIComponent(value),
+    new URLSearchParams({ v: value }).toString().slice(2),
+    JSON.stringify(value).slice(1, -1)
+  ];
+}
 
 // src/deploy-runner/index.ts
 var TIMEOUT_MS = 9e4;
-var redact = createRedactor([
-  { label: "client-secret", value: process.env.GENESYS_CLIENT_SECRET },
-  { label: "client-id", value: process.env.GENESYS_CLIENT_ID }
-]);
+var redact = createRedactor(
+  credentialSecrets(
+    process.env.GENESYS_CLIENT_ID,
+    process.env.GENESYS_CLIENT_SECRET
+  )
+);
 function emit(type, ...args) {
   if (type === "log") {
     const [level, message] = args;
@@ -128251,14 +128283,16 @@ import_node_https.default.get = function patchedGet(...args) {
   return origGet.apply(this, args);
 };
 var origConsoleLog = console.log;
+var origConsoleWarn = console.warn;
+var origConsoleError = console.error;
 var tracePrefix = "TRACE:";
 var SUPPRESSED_TRACES = [/Unknown feature being requested/];
-function interceptTrace(text) {
+function interceptTrace(text, level) {
   if (text.startsWith(tracePrefix)) {
     const msg = text.slice(tracePrefix.length).trim();
     if (SUPPRESSED_TRACES.some((p) => p.test(msg))) return true;
     traces.push(msg);
-    emit("log", "info", msg);
+    emit("log", level, msg);
     return true;
   }
   return false;
@@ -128266,20 +128300,27 @@ function interceptTrace(text) {
 console.log = (...args) => {
   const first = args[0];
   if (typeof first === "string") {
-    if (interceptTrace(first)) return;
+    if (interceptTrace(first, "info")) return;
     if (first.startsWith("- ") || first.startsWith("navigator unavailable"))
       return;
   }
-  origConsoleLog.apply(
-    console,
-    args.map((a) => typeof a === "string" ? redact(a) : a)
-  );
+  origConsoleLog.apply(console, args);
+};
+console.warn = (...args) => {
+  const first = args[0];
+  if (typeof first === "string" && interceptTrace(first, "warn")) return;
+  origConsoleWarn.apply(console, args);
+};
+console.error = (...args) => {
+  const first = args[0];
+  if (typeof first === "string" && interceptTrace(first, "error")) return;
+  origConsoleError.apply(console, args);
 };
 var origStdoutWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = ((chunk, ...rest) => {
   const str = typeof chunk === "string" ? chunk : String(chunk);
   if (str.startsWith(tracePrefix)) {
-    interceptTrace(str.trimEnd());
+    interceptTrace(str.trimEnd(), "info");
     return true;
   }
   return origStdoutWrite(
@@ -128291,7 +128332,7 @@ var origStderrWrite = process.stderr.write.bind(process.stderr);
 process.stderr.write = ((chunk, ...rest) => {
   const str = typeof chunk === "string" ? chunk : String(chunk);
   if (str.startsWith(tracePrefix)) {
-    interceptTrace(str.trimEnd());
+    interceptTrace(str.trimEnd(), "error");
     return true;
   }
   return origStderrWrite(
@@ -128312,6 +128353,37 @@ var checkInSucceeded = false;
 var sdkVersion;
 var validationIssues = [];
 var inValidationSummary = false;
+var summaryHeaderIndent;
+var summaryHeader;
+function captureValidationSummary(msg, level) {
+  let consumed = false;
+  for (const line of msg.split("\n")) {
+    if (line.includes("Validation Summary Done")) {
+      inValidationSummary = false;
+      summaryHeaderIndent = void 0;
+      summaryHeader = void 0;
+      consumed = true;
+    } else if (line.includes("Validation Summary")) {
+      inValidationSummary = true;
+      consumed = true;
+    } else if (inValidationSummary) {
+      consumed = true;
+      const text = line.trim();
+      if (!text || text === "No validation issues.") continue;
+      const indent = line.length - line.trimStart().length;
+      if (summaryHeaderIndent === void 0 || indent <= summaryHeaderIndent) {
+        summaryHeaderIndent = indent;
+        summaryHeader = text;
+        continue;
+      }
+      validationIssues.push({
+        severity: level === "error" ? "error" : "warning",
+        text: summaryHeader ? `[${summaryHeader}] ${text}` : text
+      });
+    }
+  }
+  return consumed;
+}
 var FLOW_CREATED_RE = /successfully created flow name '(.+?)' \(id: '(.+?)'\)/;
 var FLOW_REPLACED_RE = /successfully posted request to delete the existing flow named '.+?' \(id: '(.+?)'\)/;
 var PUBLISH_SUCCEEDED_RE = /publishAsync - publish successful/;
@@ -128322,7 +128394,7 @@ function installLogging(scripting) {
     const level = logMessage.logType || "info";
     const msg = logMessage.messageParts?.message || logMessage.messageFull || "";
     if (msg.includes("clientSecret:") || msg.includes("auth token"))
-      return false;
+      return true;
     const created = msg.match(FLOW_CREATED_RE);
     if (created) {
       publishedFlowName = created[1];
@@ -128338,21 +128410,9 @@ function installLogging(scripting) {
     if (CHECK_IN_SUCCEEDED_RE.test(msg)) {
       checkInSucceeded = true;
     }
-    if (msg.includes("Validation Summary Done")) {
-      inValidationSummary = false;
-    } else if (msg.includes("Validation Summary")) {
-      inValidationSummary = true;
-    } else if (inValidationSummary) {
-      const trimmed = msg.trim();
-      if (trimmed && trimmed !== "No validation issues.") {
-        validationIssues.push(trimmed);
-      }
-    }
-    if (level === "warning" || level === "error") {
-      const mappedLevel = LEVEL_PREFIX[level] || "info";
-      if (mappedLevel === "warn" && !msg.includes("end method is being called")) {
-        validationIssues.push(msg);
-      }
+    const isSummary = captureValidationSummary(msg, level);
+    if (!isSummary && level === "warning" && !msg.includes("end method is being called")) {
+      validationIssues.push({ severity: "warning", text: msg });
     }
     emit("log", LEVEL_PREFIX[level] || "info", msg);
     return false;
@@ -128409,13 +128469,8 @@ function toArchitectSdkRegion(scripting, apiDomain) {
   return void 0;
 }
 function validationFromLog() {
-  const errors = [];
-  const warnings = [];
-  for (const issue of validationIssues) {
-    if (/^error\b/i.test(issue)) errors.push(issue);
-    else warnings.push(issue);
-  }
-  return { errors, warnings };
+  const texts = (severity) => validationIssues.filter((i) => i.severity === severity).map((i) => i.text);
+  return { errors: texts("error"), warnings: texts("warning") };
 }
 function failure(error) {
   return {
@@ -128518,6 +128573,16 @@ async function main() {
       return;
     }
     const flowResult = await mod.buildFlow(scripting);
+    const knownFlowId = nonEmptyString(flowResult?.id) ?? publishedFlowId;
+    if (!knownFlowId && !publishSucceeded && !checkInSucceeded) {
+      emit(
+        "result",
+        failure(
+          "buildFlow() returned without creating a flow: no flow id was returned or logged by the SDK"
+        )
+      );
+      return;
+    }
     let validation = { errors: [], warnings: [] };
     if (typeof flowResult?.validateAsync === "function") {
       try {
@@ -128543,7 +128608,7 @@ async function main() {
     }
     emit("result", success(flowResult, validation));
   } catch (err) {
-    if (publishSucceeded) {
+    if (publishSucceeded || checkInSucceeded) {
       emit("result", success(void 0, validationFromLog()));
     } else {
       const message = err instanceof Error ? err.message : String(err);
