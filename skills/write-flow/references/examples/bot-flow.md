@@ -1,6 +1,6 @@
 # Example: Bot Flow
 
-Bot flow with NLU intent detection, slot filling, and confirmation. Bot flows use `AskForIntent` and `AskForSlot` for natural language conversations — the Genesys Dialog Engine handles intent matching and entity extraction at runtime. After deploying and publishing, use the `test_bot_flow` MCP tool to simulate a text conversation and verify the NLU behaves as expected.
+Bot flow with NLU intent detection and per-intent routing. Bot flows use `AskForIntent` and `AskForSlot` for natural language conversations — the Genesys Dialog Engine handles intent matching and entity extraction at runtime. In a (voice) bot flow each intent is a **dynamic output of the `AskForIntent` action**; `associateWithTask` on the intent settings is only valid in digital bot flows and the SDK rejects it here. After deploying and publishing, use the `test_bot_flow` MCP tool to simulate a text conversation and verify the NLU behaves as expected.
 
 ```typescript
 import type { ArchitectScripting } from "purecloud-flow-scripting-api-sdk-javascript";
@@ -53,13 +53,14 @@ export async function buildFlow(scripting: ArchitectScripting) {
         '"Hello! How can I help you today?"',
     );
 
-    // AskForIntent — the Dialog Engine matches user input to configured intents
+    // AskForIntent — the Dialog Engine matches user input to configured intents.
+    // The action gets one dynamic output per intent in nluCreationData.
     const askIntent = archFactoryActions.addActionAskForIntent(
         initialState,
         "Detect Intent",
     );
 
-    // Create tasks for each intent — then associate them in botFlowSettings
+    // Create a reusable task per intent, then jump to it from the intent's output
     const balanceTask = archFactoryTasks.addTask(flow, "Check Balance");
     const balanceReply = archFactoryActions.addActionCommunicate(
         balanceTask,
@@ -80,27 +81,25 @@ export async function buildFlow(scripting: ArchitectScripting) {
     );
     archFactoryActions.addActionExitBotFlow(paymentTask, "Done");
 
-    // Associate intents with tasks via botFlowSettings
-    const balanceIntent =
-        flow.botFlowSettings.getIntentSettingsByIntentName("CheckBalance");
-    if (balanceIntent) {
-        balanceIntent.confirmation.setExpression(
-            '"I think you want to check your balance, is that correct?"',
-        );
-        balanceIntent.associateWithTask(balanceTask);
-    }
+    // Route each intent output to its task. Intent outputs are dynamic, so the
+    // `true` flag is required (same as DigitalMenu choices).
+    archFactoryActions.addActionJumpToTask(
+        askIntent.getOutputByName("CheckBalance", true),
+        "Go to Check Balance",
+        balanceTask,
+    );
+    archFactoryActions.addActionJumpToTask(
+        askIntent.getOutputByName("MakePayment", true),
+        "Go to Make Payment",
+        paymentTask,
+    );
 
-    const paymentIntent =
-        flow.botFlowSettings.getIntentSettingsByIntentName("MakePayment");
-    if (paymentIntent) {
-        paymentIntent.confirmation.setExpression(
-            '"You want to make a payment, is that correct?"',
-        );
-        paymentIntent.associateWithTask(paymentTask);
-    }
-
-    // Handle no intent detected
+    // Handle no intent detected. The No Intent output is disabled by default
+    // in bot flows, so enable it or everything on it is unreachable. Every
+    // path also needs a terminating action or validation fails with
+    // "The bot does not contain a terminating action".
     const noIntentPath = askIntent.outputNoIntent;
+    noIntentPath.enabled = true;
     const fallback = archFactoryActions.addActionCommunicate(
         noIntentPath,
         "No Intent",
@@ -108,6 +107,7 @@ export async function buildFlow(scripting: ArchitectScripting) {
     fallback.communication.setExpression(
         '"I\'m sorry, I didn\'t understand that. Could you try rephrasing?"',
     );
+    archFactoryActions.addActionExitBotFlow(noIntentPath, "Exit After No Intent");
 
     return await flow.publishAsync();
 }
@@ -117,7 +117,7 @@ export async function buildFlow(scripting: ArchitectScripting) {
 
 Bot flows must be **published** before testing. The example above uses `publishAsync()` which validates, saves, and publishes in one call.
 
-**Start a test session** with the flow ID returned by `deploy_flow`:
+**Start a test session** with the `flowId` from the `deploy_flow` result (its `status` must be `published`):
 ```
 Tool: test_bot_flow
 Input: { "flowId": "<flow-id>" }

@@ -6,29 +6,56 @@ import https from "node:https";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { createRedactor } from "../shared/redact.ts";
 
 const TIMEOUT_MS = 90_000;
 
+// Built before the SDK is loaded so every output channel below is covered.
+const redact = createRedactor([
+    { label: "client-secret", value: process.env.GENESYS_CLIENT_SECRET },
+    { label: "client-id", value: process.env.GENESYS_CLIENT_ID },
+]);
+
 type LogLevel = "info" | "warn" | "error";
 
+/** How far the flow got. `published` and `checked_in` are both unlocked; `saved` means the flow exists but is still checked out. */
+export type DeployStatus = "published" | "checked_in" | "saved" | "failed";
+
+export interface DeployValidation {
+    errors: string[];
+    warnings: string[];
+}
+
+/** The single `{type:"result"}` line the runner writes to stdout for the MCP server. */
+export interface DeployResultPayload {
+    success: boolean;
+    status: DeployStatus;
+    flowId?: string;
+    flowName?: string;
+    flowType?: string;
+    flowUrl?: string;
+    /** Id of a same-name flow the SDK deleted before creating this one. */
+    replacedFlowId?: string;
+    validation: DeployValidation;
+    sdkVersion?: string;
+    error?: string;
+}
+
 function emit(type: "log", level: LogLevel, message: string): void;
-function emit(
-    type: "result",
-    payload: {
-        success: boolean;
-        flowId?: string;
-        flowName?: string;
-        warnings?: string[];
-        error?: string;
-    },
-): void;
+function emit(type: "result", payload: DeployResultPayload): void;
 function emit(type: string, ...args: unknown[]): void {
     if (type === "log") {
         const [level, message] = args as [LogLevel, string];
-        process.stdout.write(`${JSON.stringify({ type, level, message })}\n`);
+        process.stdout.write(
+            `${JSON.stringify({ type, level, message: redact(message) })}\n`,
+        );
     } else {
-        const [payload] = args as [Record<string, unknown>];
-        process.stdout.write(`${JSON.stringify({ type, ...payload })}\n`);
+        const [payload] = args as [DeployResultPayload];
+        const error =
+            payload.error === undefined ? {} : { error: redact(payload.error) };
+        process.stdout.write(
+            `${JSON.stringify({ type, ...payload, ...error })}\n`,
+        );
     }
 }
 
@@ -131,7 +158,10 @@ console.log = (...args: unknown[]) => {
         if (first.startsWith("- ") || first.startsWith("navigator unavailable"))
             return;
     }
-    origConsoleLog.apply(console, args);
+    origConsoleLog.apply(
+        console,
+        args.map((a) => (typeof a === "string" ? redact(a) : a)),
+    );
 };
 
 const origStdoutWrite = process.stdout.write.bind(process.stdout);
@@ -141,8 +171,26 @@ process.stdout.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
         interceptTrace(str.trimEnd());
         return true;
     }
-    return (origStdoutWrite as Function)(chunk, ...rest);
+    return (origStdoutWrite as Function)(
+        typeof chunk === "string" ? redact(chunk) : chunk,
+        ...rest,
+    );
 }) as typeof process.stdout.write;
+
+// Some TRACE lines (e.g. feature-config notices) go to stderr. Left there,
+// the MCP server would read them as errors and surface them as diagnosis.
+const origStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = ((chunk: unknown, ...rest: unknown[]): boolean => {
+    const str = typeof chunk === "string" ? chunk : String(chunk);
+    if (str.startsWith(tracePrefix)) {
+        interceptTrace(str.trimEnd());
+        return true;
+    }
+    return (origStderrWrite as Function)(
+        typeof chunk === "string" ? redact(chunk) : chunk,
+        ...rest,
+    );
+}) as typeof process.stderr.write;
 
 // ── SDK logging ────────────────────────────────────────────────────────
 
@@ -165,12 +213,21 @@ interface SdkLogMessage {
 
 let publishedFlowId: string | undefined;
 let publishedFlowName: string | undefined;
+let replacedFlowId: string | undefined;
 let publishSucceeded = false;
+let checkInSucceeded = false;
+let sdkVersion: string | undefined;
 const validationIssues: string[] = [];
 let inValidationSummary = false;
 
 const FLOW_CREATED_RE =
     /successfully created flow name '(.+?)' \(id: '(.+?)'\)/;
+// Logged by createAsync when it deletes an existing flow of the same name
+// before creating the new one. The id is the one the caller no longer has.
+const FLOW_REPLACED_RE =
+    /successfully posted request to delete the existing flow named '.+?' \(id: '(.+?)'\)/;
+const PUBLISH_SUCCEEDED_RE = /publishAsync - publish successful/;
+const CHECK_IN_SUCCEEDED_RE = /checkInAsync - checked in/;
 
 function installLogging(scripting: ArchitectScripting): void {
     const logging = scripting.services.archLogging;
@@ -186,8 +243,15 @@ function installLogging(scripting: ArchitectScripting): void {
             publishedFlowName = created[1];
             publishedFlowId = created[2];
         }
-        if (msg.includes("publish successful")) {
+        const replaced = msg.match(FLOW_REPLACED_RE);
+        if (replaced) {
+            replacedFlowId = replaced[1];
+        }
+        if (PUBLISH_SUCCEEDED_RE.test(msg)) {
             publishSucceeded = true;
+        }
+        if (CHECK_IN_SUCCEEDED_RE.test(msg)) {
+            checkInSucceeded = true;
         }
 
         if (msg.includes("Validation Summary Done")) {
@@ -294,14 +358,80 @@ function toArchitectSdkRegion(
     return undefined;
 }
 
+// ── Result assembly ───────────────────────────────────────────────────
+
+/** Validation issues captured from the SDK log, split by severity. Issues the
+ *  SDK's summary leaves unlabelled are reported as warnings. */
+function validationFromLog(): DeployValidation {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    for (const issue of validationIssues) {
+        if (/^error\b/i.test(issue)) errors.push(issue);
+        else warnings.push(issue);
+    }
+    return { errors, warnings };
+}
+
+function failure(error: string): DeployResultPayload {
+    return {
+        success: false,
+        status: "failed",
+        flowId: publishedFlowId,
+        flowName: publishedFlowName,
+        replacedFlowId,
+        validation: validationFromLog(),
+        sdkVersion,
+        error,
+    };
+}
+
+function successStatus(): DeployStatus {
+    if (publishSucceeded) return "published";
+    if (checkInSucceeded) return "checked_in";
+    return "saved";
+}
+
+/** Shape of the object the flow file's buildFlow() resolves to when it returns
+ *  the result of checkInAsync()/publishAsync()/saveAsync(), all of which
+ *  resolve to the flow itself. Everything is optional because a flow file
+ *  may return anything. */
+interface FlowLike {
+    id?: unknown;
+    name?: unknown;
+    flowType?: unknown;
+    url?: unknown;
+    validateAsync?: unknown;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function success(
+    flow: FlowLike | undefined,
+    validation: DeployValidation,
+): DeployResultPayload {
+    return {
+        success: true,
+        status: successStatus(),
+        // Prefer what the flow object reports; fall back to what the SDK
+        // logged during createAsync, which is all we have when buildFlow()
+        // returns something other than the flow.
+        flowId: nonEmptyString(flow?.id) ?? publishedFlowId,
+        flowName: nonEmptyString(flow?.name) ?? publishedFlowName,
+        flowType: nonEmptyString(flow?.flowType),
+        flowUrl: nonEmptyString(flow?.url),
+        replacedFlowId,
+        validation,
+        sdkVersion,
+    };
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
     const timer = setTimeout(() => {
-        emit("result", {
-            success: false,
-            error: `Deploy timed out after ${TIMEOUT_MS / 1000}s`,
-        });
+        emit("result", failure(`Deploy timed out after ${TIMEOUT_MS / 1000}s`));
         process.exit(2);
     }, TIMEOUT_MS);
     timer.unref();
@@ -316,10 +446,7 @@ async function main(): Promise<void> {
     const flowFile = values["flow-file"];
 
     if (!flowFile) {
-        emit("result", {
-            success: false,
-            error: "Missing --flow-file argument",
-        });
+        emit("result", failure("Missing --flow-file argument"));
         process.exit(1);
     }
 
@@ -330,10 +457,12 @@ async function main(): Promise<void> {
     const clientSecret = process.env.GENESYS_CLIENT_SECRET;
 
     if (!region || !clientId || !clientSecret) {
-        emit("result", {
-            success: false,
-            error: "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET",
-        });
+        emit(
+            "result",
+            failure(
+                "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET",
+            ),
+        );
         process.exit(1);
     }
 
@@ -341,13 +470,18 @@ async function main(): Promise<void> {
     const scripting: ArchitectScripting = require("purecloud-flow-scripting-api-sdk-javascript");
 
     installLogging(scripting);
+    sdkVersion = nonEmptyString(
+        scripting.environment.ArchScriptingInfo?.version,
+    );
 
     const sdkRegion = toArchitectSdkRegion(scripting, region);
     if (!sdkRegion) {
-        emit("result", {
-            success: false,
-            error: `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`,
-        });
+        emit(
+            "result",
+            failure(
+                `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`,
+            ),
+        );
         process.exit(1);
     }
 
@@ -364,56 +498,50 @@ async function main(): Promise<void> {
         const mod = await import(pathToFileURL(absoluteFlowPath).href);
 
         if (typeof mod.buildFlow !== "function") {
-            emit("result", {
-                success: false,
-                error: `Flow file does not export a buildFlow function: ${absoluteFlowPath}`,
-            });
+            emit(
+                "result",
+                failure(
+                    `Flow file does not export a buildFlow function: ${absoluteFlowPath}`,
+                ),
+            );
             return;
         }
 
-        const flowResult = await mod.buildFlow(scripting);
+        const flowResult: FlowLike | undefined = await mod.buildFlow(scripting);
 
-        let warnings: string[] | undefined;
+        let validation: DeployValidation = { errors: [], warnings: [] };
         if (typeof flowResult?.validateAsync === "function") {
             try {
-                const validation = await flowResult.validateAsync();
-                if (validation.hasErrorsOrWarnings) {
-                    warnings = [];
-                    for (const issue of validation.issues) {
+                const results = await flowResult.validateAsync();
+                if (results.hasErrorsOrWarnings) {
+                    for (const issue of results.issues) {
                         const label = issue.archObject?.logStr ?? "Unknown";
                         for (const err of issue.errors ?? [])
-                            warnings.push(`ERROR [${label}]: ${err}`);
+                            validation.errors.push(`[${label}] ${err}`);
                         for (const warn of issue.warnings ?? [])
-                            warnings.push(`WARN [${label}]: ${warn}`);
+                            validation.warnings.push(`[${label}] ${warn}`);
                     }
-                    for (const w of warnings) emit("log", "warn", w);
+                    for (const e of validation.errors)
+                        emit("log", "error", `Validation error ${e}`);
+                    for (const w of validation.warnings)
+                        emit("log", "warn", `Validation warning ${w}`);
                 }
             } catch {
-                if (validationIssues.length > 0) {
-                    warnings = validationIssues;
-                }
+                validation = validationFromLog();
             }
+        } else {
+            validation = validationFromLog();
         }
 
-        emit("result", {
-            success: true,
-            flowId: publishedFlowId,
-            flowName: publishedFlowName,
-            warnings,
-        });
+        emit("result", success(flowResult, validation));
     } catch (err) {
         if (publishSucceeded) {
-            const warnings =
-                validationIssues.length > 0 ? validationIssues : undefined;
-            emit("result", {
-                success: true,
-                flowId: publishedFlowId,
-                flowName: publishedFlowName,
-                warnings,
-            });
+            // The publish itself went through; whatever threw afterwards
+            // (typically the post-publish searchability poll) does not undo it.
+            emit("result", success(undefined, validationFromLog()));
         } else {
             const message = err instanceof Error ? err.message : String(err);
-            emit("result", { success: false, error: message });
+            emit("result", failure(message));
         }
     } finally {
         session.endExitCode = 0;
@@ -424,9 +552,11 @@ async function main(): Promise<void> {
 main()
     .then(() => process.exit(0))
     .catch((err) => {
-        emit("result", {
-            success: false,
-            error: `Unhandled error: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        emit(
+            "result",
+            failure(
+                `Unhandled error: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+        );
         process.exit(1);
     });

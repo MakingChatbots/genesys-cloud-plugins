@@ -37,7 +37,7 @@ export async function buildFlow(scripting: ArchitectScripting) {
 - The SDK instance is passed as a parameter — never `require()` it
 - Only use `import type` from the SDK package
 - The deploy runner handles authentication and session management
-- Return `await flow.checkInAsync()` — this saves the flow and returns the flow object, which the deploy runner uses to run `validateAsync()` and report validation warnings/errors
+- Return `await flow.checkInAsync()` — this saves the flow and returns the flow object, which the deploy runner uses to run `validateAsync()` and to report the flow's id, name, type and URL in the deploy result
 
 ## Flow Creation Methods
 
@@ -171,3 +171,5 @@ Always `await` these:
 ## Re-creating Existing Flows
 
 `createFlow*Async` will delete an existing flow with the same name before creating. This requires `architect:flow:delete` permission. If the flow is referenced by another flow, delete the dependent flow first.
+
+Because the flow is deleted and recreated, **its id changes on every deploy**. The `deploy_flow` result reports the deleted flow's id as `replacedFlowId`; when it is non-null, replace any stored flow id (e.g. for `test_bot_flow`) with the new `flowId`.
