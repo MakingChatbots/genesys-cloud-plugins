@@ -28,7 +28,7 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "purecloud-flow-scripting-api-sdk-javascript": "^0.69.1",
     "purecloud-platform-client-v2": "^263.2.0",
     "zod": "^4.6.5"
