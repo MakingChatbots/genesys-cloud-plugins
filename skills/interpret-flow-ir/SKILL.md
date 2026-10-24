@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution or flow_execution_data tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), prompt questions ("what does the caller hear here", "what does Prompt.Welcome say"; resolve with get_prompts), and execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
+description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution, flow_execution_data or flow_versions tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), prompt questions ("what does the caller hear here", "what does Prompt.Welcome say"; resolve with get_prompts), execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"), and publish-history questions ("when was this flow last published", "which version was live at 09:30", "what changed on the 5th"; resolve with flow_versions). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
 ---
 
 # Interpreting Flow IRs
@@ -234,6 +234,54 @@ against the IR before reading off which prompt was playing N seconds in.
 
 Inline `ToAudioTTS("...")` text and `PromptSystem.<name>` system prompts are not
 user prompts; the former is already in the raw config, the latter is out of scope.
+
+## Publish history: the `flow_versions` tool
+
+Every publish, check-in and save of a flow is a **version**, and
+`flow_versions` lists them, newest first, with the exact times each one was
+live. Reach for it when the question is *when* a flow changed rather than
+*what* it does: "when did v58 go out", "which version was handling calls at
+09:30 on the 5th", "has anyone published this since Tuesday", "how often does
+this flow change". One call replaces bucketing flow aggregates by
+`flowVersion` to guess at a publish time.
+
+**The envelope.**
+`{ flowId, flowName, flowType, publishedVersion, versions: [{ version, id, kind,
+dateCreated, datePublished, datePublishedEnd, isPublished, createdBy?,
+createdByClient? }], total, notes? }`
+
+- `version` is the checked-in version number Architect shows (`"57.0"`, as in
+  "Check in Version 57.0"). It is the same string
+  `find_flow_execution` reports as `flowVersion`, so a run joins to the
+  configuration it executed, and it is what the Architect UI and the flow
+  aggregates call the version.
+- `datePublished` and `datePublishedEnd` bound the window in which that version
+  was the live one, and consecutive publishes chain exactly: one version's end
+  is the next one's start. **Which version handled a conversation at time T**
+  is the version whose window contains T, not the newest version created
+  before T, since a check-in creates a version without changing what runs.
+  `isPublished: true` is the test for "live now". A `datePublishedEnd` of
+  `null` is *not*: Genesys only began recording the end date around mid-2023,
+  so superseded versions older than that have `null` too, and their window
+  closes at the next publish's `datePublished`.
+- `kind` is `publish`, `checkin` or `save`, derived from which dates the API
+  stamped (it documents a type field but does not return one). `publish` means
+  the version was the live one at some point. By default only publishes are
+  returned, since only they ever handled traffic; pass `includeCheckIns: true`
+  to see the work-in-progress check-ins between them. Very old versions can be
+  `unknown`; they are kept in the default view rather than dropped.
+- There is **no publish comment**: the API records none, so what a publish
+  changed must be read from the configuration (`flow_ir`, `search_in_flow`),
+  not from the version list.
+- `createdBy` and `createdByClient` appear **only** when the caller passes
+  `includeAuthor: true`. The default output carries no person identifiers;
+  do not set the flag unless the user has asked who made a change and the data
+  owner has agreed to that being surfaced. Even then the API gives the user's
+  **id only**, not a name.
+- `publishedVersion: null` means the flow is not currently published.
+- `total` counts every version of every kind, before the publish-only filter
+  and before the fetch cap, so it routinely exceeds `versions.length`; `notes`
+  says how many were omitted and why.
 
 ## Content search: the `search_in_flow` tool
 
