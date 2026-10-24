@@ -4,7 +4,10 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import {
+    fetchFlowConfiguration,
+    flowVersionInput,
+} from "../utilities/fetch-flow-configuration.ts";
 import { isExactNameMatch } from "../utilities/name-match.ts";
 import type { ToolFactory } from "../utilities/types.ts";
 
@@ -34,6 +37,7 @@ export interface ToolConfig {
 
 const inputSchema = {
     flowId: z.string().min(1).describe("The Genesys Cloud Architect flow ID"),
+    flowVersion: flowVersionInput,
     task: z
         .string()
         .min(1)
@@ -64,8 +68,12 @@ export const flowIr: ToolFactory<ToolConfig, typeof inputSchema> = ({
         },
         inputSchema,
     },
-    handler: async ({ flowId, task }) => {
-        const fetched = await fetchFlowConfiguration(architectApi, flowId);
+    handler: async ({ flowId, flowVersion, task }) => {
+        const fetched = await fetchFlowConfiguration(
+            architectApi,
+            flowId,
+            flowVersion,
+        );
         if (!fetched.ok) {
             return {
                 isError: true,
@@ -135,6 +143,7 @@ export const flowIr: ToolFactory<ToolConfig, typeof inputSchema> = ({
                     type: "text",
                     text: JSON.stringify({
                         flowId,
+                        configuration: fetched.source,
                         ir,
                         warnings: result.warnings,
                     }),

@@ -4,7 +4,11 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import {
+    describeConfiguration,
+    fetchFlowConfiguration,
+    flowVersionInput,
+} from "../utilities/fetch-flow-configuration.ts";
 import type { ToolFactory } from "../utilities/types.ts";
 
 export interface ToolConfig {
@@ -94,6 +98,7 @@ function isSearchable(configuration: unknown): boolean {
 
 const inputSchema = {
     flowId: z.string().min(1).describe("The Genesys Cloud Architect flow ID"),
+    flowVersion: flowVersionInput,
     pattern: z
         .string()
         .min(1)
@@ -142,7 +147,7 @@ export const searchInFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
         },
         inputSchema,
     },
-    handler: async ({ flowId, pattern, regex, caseSensitive }) => {
+    handler: async ({ flowId, flowVersion, pattern, regex, caseSensitive }) => {
         // Compiled before the fetch so a bad expression costs nothing.
         const plan = buildQuery(pattern, regex, caseSensitive);
         if (!plan.ok) {
@@ -152,7 +157,11 @@ export const searchInFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             };
         }
 
-        const fetched = await fetchFlowConfiguration(architectApi, flowId);
+        const fetched = await fetchFlowConfiguration(
+            architectApi,
+            flowId,
+            flowVersion,
+        );
         if (!fetched.ok) {
             return {
                 isError: true,
@@ -168,7 +177,7 @@ export const searchInFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
                     {
                         type: "text",
                         text:
-                            `The latest configuration of flow "${flowId}" has no ` +
+                            `The ${describeConfiguration(fetched.source)} of flow "${flowId}" has no ` +
                             "flowSequenceItemList to search — the flow type may be " +
                             "unsupported. Nothing was searched, so this is not a " +
                             "zero-match result.",
@@ -228,6 +237,7 @@ export const searchInFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
                     type: "text",
                     text: JSON.stringify({
                         flowId,
+                        configuration: fetched.source,
                         pattern,
                         totalMatchedActions: matches.length,
                         matchedActions,

@@ -4,7 +4,10 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import {
+    fetchFlowConfiguration,
+    flowVersionInput,
+} from "../utilities/fetch-flow-configuration.ts";
 import type { ToolFactory } from "../utilities/types.ts";
 
 export interface ToolConfig {
@@ -53,6 +56,7 @@ function planLookups(requestedIds: readonly string[]): {
 
 const inputSchema = {
     flowId: z.string().min(1).describe("The Genesys Cloud Architect flow ID"),
+    flowVersion: flowVersionInput,
     actionIds: z
         .array(z.string().min(1))
         .min(1)
@@ -87,8 +91,12 @@ export const flowAction: ToolFactory<ToolConfig, typeof inputSchema> = ({
         },
         inputSchema,
     },
-    handler: async ({ flowId, actionIds }) => {
-        const fetched = await fetchFlowConfiguration(architectApi, flowId);
+    handler: async ({ flowId, flowVersion, actionIds }) => {
+        const fetched = await fetchFlowConfiguration(
+            architectApi,
+            flowId,
+            flowVersion,
+        );
         if (!fetched.ok) {
             return {
                 isError: true,
@@ -116,9 +124,14 @@ export const flowAction: ToolFactory<ToolConfig, typeof inputSchema> = ({
         }
         if (lookup.notFound.length > 0) {
             notes.push(
-                "Ids in notFound are absent from this flow's latest configuration. The flow " +
-                    "may have been redeployed since flow_ir was called, so re-run flow_ir and " +
-                    "re-join rather than concluding those actions no longer exist.",
+                "latest" in fetched.source
+                    ? "Ids in notFound are absent from this flow's latest configuration. The flow " +
+                          "may have been redeployed since flow_ir was called, so re-run flow_ir and " +
+                          "re-join rather than concluding those actions no longer exist."
+                    : `Ids in notFound are absent from version "${fetched.source.flowVersion}" of ` +
+                          "this flow. If they came from a flow_ir call on a different version " +
+                          "(or on the latest configuration) they exist only there; re-run " +
+                          "flow_ir with the same flowVersion and re-join.",
             );
         }
 
@@ -128,6 +141,7 @@ export const flowAction: ToolFactory<ToolConfig, typeof inputSchema> = ({
                     type: "text",
                     text: JSON.stringify({
                         flowId,
+                        configuration: fetched.source,
                         found: lookup.found.map(asRequested),
                         notFound: lookup.notFound.map(
                             (id) => requestedFor.get(id) ?? id,

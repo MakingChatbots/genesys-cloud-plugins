@@ -104,8 +104,8 @@ export const findQueue: ToolFactory<ToolConfig, typeof inputSchema> = ({
             "Use the returned exact name as " +
             "the search_in_flow query to find the actions in a flow that " +
             "transfer to the queue. The in-queue flow ids are accepted " +
-            "verbatim by flow_ir, flow_action, search_in_flow and " +
-            "flow_dependencies.",
+            "verbatim by flow_ir, flow_action, search_in_flow, " +
+            "flow_dependencies and flow_versions.",
         annotations: {
             title: "Find Queue",
             readOnlyHint: true,

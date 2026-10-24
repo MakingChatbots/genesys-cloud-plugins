@@ -7,7 +7,12 @@ import {
     toApiError,
 } from "../utilities/api-error.ts";
 import { type EntityRef, toEntityRef } from "../utilities/entity-ref.ts";
-import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import {
+    type ConfigurationSource,
+    describeConfiguration,
+    fetchFlowConfiguration,
+    flowVersionInput,
+} from "../utilities/fetch-flow-configuration.ts";
 import { nameKey } from "../utilities/name-match.ts";
 import type { ToolFactory } from "../utilities/types.ts";
 
@@ -83,6 +88,8 @@ interface FailedLookup {
 
 interface GetPromptsResult {
     flowId?: string;
+    /** Only with flowId: which configuration of the flow the references were read from. */
+    configuration?: ConfigurationSource;
     /** Prompts in the order requested: promptIds, then promptNames, then flow references in encounter order. */
     prompts: PromptSummary[];
     durationTotals: DurationTotal[];
@@ -288,12 +295,14 @@ const inputSchema = {
         .optional()
         .describe(
             "A Genesys Cloud Architect flow ID. Every user prompt the flow's " +
-                "latest configuration references is returned, in the order " +
+                "configuration (the latest, or the `flowVersion` given) " +
+                "references is returned, in the order " +
                 "the references are encountered, so one call covers the " +
                 `flow's whole script. At most ${MAX_PROMPTS} referenced ` +
                 "prompts are fetched; any beyond that are listed in a note " +
                 "to fetch via `promptIds`.",
         ),
+    flowVersion: flowVersionInput,
     language: z
         .string()
         .min(1)
@@ -336,7 +345,13 @@ export const getPrompts: ToolFactory<ToolConfig, typeof inputSchema> = ({
         },
         inputSchema,
     },
-    handler: async ({ promptIds = [], promptNames = [], flowId, language }) => {
+    handler: async ({
+        promptIds = [],
+        promptNames = [],
+        flowId,
+        flowVersion,
+        language,
+    }) => {
         if (promptIds.length === 0 && promptNames.length === 0 && !flowId) {
             return {
                 isError: true,
@@ -344,6 +359,17 @@ export const getPrompts: ToolFactory<ToolConfig, typeof inputSchema> = ({
                     {
                         type: "text",
                         text: "Provide at least one of `promptIds`, `promptNames` or `flowId`.",
+                    },
+                ],
+            };
+        }
+        if (flowVersion && !flowId) {
+            return {
+                isError: true,
+                content: [
+                    {
+                        type: "text",
+                        text: "`flowVersion` selects which configuration of `flowId` to read, so it needs `flowId`.",
                     },
                 ],
             };
@@ -414,16 +440,25 @@ export const getPrompts: ToolFactory<ToolConfig, typeof inputSchema> = ({
         // Fetch the flow first: it is one cheap call, and failing on it
         // before any prompt lookups means a bad flowId cannot discard
         // prompts already retrieved by id or name.
-        let flowReferences: EntityRef[] = [];
+        let flow:
+            | { references: EntityRef[]; source: ConfigurationSource }
+            | undefined;
         if (flowId) {
-            const fetched = await fetchFlowConfiguration(architectApi, flowId);
+            const fetched = await fetchFlowConfiguration(
+                architectApi,
+                flowId,
+                flowVersion,
+            );
             if (!fetched.ok) {
                 return {
                     isError: true,
                     content: [{ type: "text", text: fetched.message }],
                 };
             }
-            flowReferences = collectPromptReferences(fetched.configuration);
+            flow = {
+                references: collectPromptReferences(fetched.configuration),
+                source: fetched.source,
+            };
         }
 
         try {
@@ -483,12 +518,13 @@ export const getPrompts: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 }
             }
 
-            if (flowId) {
-                const references = flowReferences;
+            if (flow) {
+                const { references, source } = flow;
                 if (references.length === 0) {
                     notes.push(
                         `Flow "${flowId}" references no user prompts in its ` +
-                            "latest configuration. Audio it plays is inline " +
+                            `${describeConfiguration(source)}. ` +
+                            "Audio it plays is inline " +
                             "TTS, system prompts or neither.",
                     );
                 }
@@ -564,7 +600,7 @@ export const getPrompts: ToolFactory<ToolConfig, typeof inputSchema> = ({
         }
 
         const result: GetPromptsResult = {
-            ...(flowId ? { flowId } : {}),
+            ...(flowId && flow ? { flowId, configuration: flow.source } : {}),
             prompts,
             durationTotals,
             notFound,

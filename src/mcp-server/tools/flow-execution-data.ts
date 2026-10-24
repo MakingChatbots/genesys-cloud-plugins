@@ -14,7 +14,10 @@ import {
     formatApiError,
     toApiError,
 } from "../utilities/api-error.ts";
-import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import {
+    type ConfigurationSource,
+    fetchFlowConfiguration,
+} from "../utilities/fetch-flow-configuration.ts";
 import type { ToolFactory } from "../utilities/types.ts";
 
 /**
@@ -50,8 +53,12 @@ interface FlowExecutionDataResult {
     summary: ExecutionSummary;
     events: ExecutionEvent[];
     ir?: {
-        /** Which flow configuration the join used. */
-        configuration: { flowVersion: string } | { latest: true };
+        /**
+         * Which flow configuration the join used; `deleted: true` when the
+         * flow has been deleted and the configuration was read as a deleted
+         * flow's.
+         */
+        configuration: ConfigurationSource;
         unmatchedActionIds: string[];
         unmatchedStateIds: string[];
         actionsNotExecuted: ExecutionActionNotExecuted[];
@@ -446,37 +453,37 @@ async function fetchConfiguration(
 ): Promise<
     | {
           configuration: unknown;
-          configuration_source: { flowVersion: string } | { latest: true };
+          configuration_source: ConfigurationSource;
       }
     | undefined
 > {
     if (flowVersion) {
-        try {
-            const configuration =
-                await architectApi.getFlowVersionConfiguration(
-                    flowId,
-                    flowVersion,
-                );
+        const exact = await fetchFlowConfiguration(
+            architectApi,
+            flowId,
+            flowVersion,
+        );
+        if (exact.ok) {
             return {
-                configuration,
-                configuration_source: { flowVersion },
+                configuration: exact.configuration,
+                configuration_source: exact.source,
             };
-        } catch (err) {
-            if (toApiError(err).status === 410) {
-                // Deleted flows have no latest configuration either.
-                notes.push(
-                    "IR join skipped: the flow has been deleted, so no configuration " +
-                        "can be fetched. The events are still complete; only the " +
-                        "ir annotations and actionsNotExecuted are unavailable.",
-                );
-                return undefined;
-            }
-            notes.push(
-                `Could not fetch the configuration of flow version ${flowVersion} ` +
-                    `(${formatApiError(err)}); the IR join used the latest ` +
-                    "configuration instead, which may differ from what ran.",
-            );
         }
+        if (exact.status === 410) {
+            // Even the deleted-flow retry failed, so the latest
+            // configuration will not be readable either.
+            notes.push(
+                "IR join skipped: the flow has been deleted, so no configuration " +
+                    "can be fetched. The events are still complete; only the " +
+                    "ir annotations and actionsNotExecuted are unavailable.",
+            );
+            return undefined;
+        }
+        notes.push(
+            `Could not fetch the configuration of flow version ${flowVersion} ` +
+                `(${exact.message}) so the IR join used the latest ` +
+                "configuration instead, which may differ from what ran.",
+        );
     } else {
         notes.push(
             "The execution data carried no flowVersion; the IR join used the " +
@@ -490,6 +497,6 @@ async function fetchConfiguration(
     }
     return {
         configuration: latest.configuration,
-        configuration_source: { latest: true },
+        configuration_source: latest.source,
     };
 }

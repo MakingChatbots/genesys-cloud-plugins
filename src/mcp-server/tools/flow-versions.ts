@@ -12,15 +12,22 @@ const PERMISSION = "Architect > Flow > View (architect:flow:view)";
 
 const PAGE_SIZE = 100;
 
-/** Caps the pages fetched; a long-lived flow can accumulate many versions. */
-const MAX_FETCHED_VERSIONS = 500;
+/**
+ * Runaway guard on the pages fetched. The API pages versions in id-string
+ * order ("1.0", "10.0", "100.0", ...), not by date, so a flow that exceeds
+ * this cap loses an arbitrary set of versions, not simply the oldest; the
+ * cap is therefore generous and the note says what was lost.
+ */
+const MAX_FETCHED_VERSIONS = 2000;
 
 /**
- * What created the version. The API documents a `type` field but does not
- * return it, so this is derived from which dates it stamps: a version that
- * was ever published carries datePublished, a check-in carries dateCheckedIn
- * without it, and a save carries only dateSaved. Versions from before the
- * API recorded these dates can be told apart no further than "unknown".
+ * What created the version. The API schema declares a `type` of PUBLISH,
+ * CHECKIN or SAVE but has not been observed returning it, so the kind is
+ * taken from `type` when present and otherwise derived from which dates the
+ * API stamps: a version that was ever published carries datePublished, a
+ * check-in carries dateCheckedIn without it, and a save carries dateSaved or
+ * a saved_version_ id. Old versions with none of these are "unknown"; in
+ * practice (seen only before 2023) they are check-ins.
  */
 type VersionKind = "publish" | "checkin" | "save" | "unknown";
 
@@ -64,6 +71,8 @@ interface FlowVersionsResult {
     versions: FlowVersionSummary[];
     /** Every version the flow has, of every kind, before filtering and the fetch cap. */
     total: number;
+    /** Present when the flow has been deleted; the history is as it stood at deletion. */
+    deleted?: true;
     notes?: string[];
 }
 
@@ -77,8 +86,24 @@ function epochToIso(epochMs: number | undefined): string | null {
 /** Saves that were never checked in are listed under this id prefix. */
 const SAVED_VERSION_PREFIX = "saved_version_";
 
-function toKind(version: Models.FlowVersion): VersionKind {
-    if (version.datePublished) return "publish";
+const KIND_FROM_API: Record<string, VersionKind> = {
+    PUBLISH: "publish",
+    CHECKIN: "checkin",
+    SAVE: "save",
+};
+
+/**
+ * `isPublished` is checked first: the currently published version is a
+ * publish whatever its dates say, so it is never filtered out of the
+ * default view.
+ */
+function toKind(
+    version: Models.FlowVersion,
+    isPublished: boolean,
+): VersionKind {
+    if (isPublished || version.datePublished) return "publish";
+    const typed = version.type && KIND_FROM_API[version.type.toUpperCase()];
+    if (typed) return typed;
     if (version.dateCheckedIn !== undefined) return "checkin";
     if (
         version.dateSaved !== undefined ||
@@ -122,14 +147,15 @@ function toSummary(
     published: Models.FlowVersion | undefined,
     includeAuthor: boolean,
 ): FlowVersionSummary {
+    const isPublished = isPublishedVersion(version, published);
     return {
         version: version.commitVersion ?? "",
         id: version.id ?? "",
-        kind: toKind(version),
+        kind: toKind(version, isPublished),
         dateCreated: epochToIso(version.dateCreated),
         datePublished: version.datePublished ?? null,
         datePublishedEnd: version.datePublishedEnd ?? null,
-        isPublished: isPublishedVersion(version, published),
+        isPublished,
         ...(includeAuthor
             ? {
                   createdBy: toEntityRef(version.createdBy),
@@ -184,7 +210,8 @@ export const flowVersions: ToolFactory<ToolConfig, typeof inputSchema> = ({
             "publish comment, so what changed must be read from the " +
             "configuration. Only publishes are listed unless " +
             "includeCheckIns is set. Authors are omitted unless " +
-            "includeAuthor is set.",
+            "includeAuthor is set. A deleted flow's history is still " +
+            "listed, flagged deleted: true.",
         annotations: {
             title: "Flow Versions",
             readOnlyHint: true,
@@ -194,7 +221,7 @@ export const flowVersions: ToolFactory<ToolConfig, typeof inputSchema> = ({
     },
     handler: async ({ flowId, includeCheckIns, includeAuthor }) => {
         try {
-            const fetchVersions = async () => {
+            const fetchVersions = async (deleted: boolean) => {
                 const entities: Models.FlowVersion[] = [];
                 let total = 0;
                 let pageNumber = 1;
@@ -202,6 +229,7 @@ export const flowVersions: ToolFactory<ToolConfig, typeof inputSchema> = ({
                     const page = await architectApi.getFlowVersions(flowId, {
                         pageSize: PAGE_SIZE,
                         pageNumber,
+                        ...(deleted ? { deleted: true } : {}),
                     });
                     if (page.entities) entities.push(...page.entities);
                     // A page may omit the optional total; keep the last
@@ -218,49 +246,74 @@ export const flowVersions: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 return { entities, total: Math.max(total, entities.length) };
             };
 
-            const [flow, fetched] = await Promise.all([
-                architectApi.getFlow(flowId),
-                fetchVersions(),
-            ]);
+            // The flow lookup goes first: one call validates the id before
+            // the versions are paged. A deleted flow answers 410, and both
+            // calls still serve it when asked for deleted flows.
+            const loadFlow = async (): Promise<{
+                flow: Models.Flow;
+                deleted: boolean;
+            }> => {
+                try {
+                    return {
+                        flow: await architectApi.getFlow(flowId),
+                        deleted: false,
+                    };
+                } catch (err) {
+                    if (toApiError(err).status !== 410) throw err;
+                    return {
+                        flow: await architectApi.getFlow(flowId, {
+                            deleted: true,
+                        }),
+                        deleted: true,
+                    };
+                }
+            };
+            const { flow, deleted } = await loadFlow();
+            const fetched = await fetchVersions(deleted);
 
             const published = flow.publishedVersion;
             const all = fetched.entities.map((v) =>
                 toSummary(v, published, includeAuthor ?? false),
             );
-            // An entity of unknown kind is kept rather than dropped, so a
-            // response lacking the type field still lists every version.
+            // Only publishes ever handled traffic. An unknown kind (no date
+            // stamps at all, seen only before 2023) has in practice always
+            // been a check-in, so the default view omits it too.
             const versions = (
-                includeCheckIns
-                    ? all
-                    : all.filter(
-                          (v) => v.kind !== "checkin" && v.kind !== "save",
-                      )
+                includeCheckIns ? all : all.filter((v) => v.kind === "publish")
             ).sort(newestFirst);
             const omitted = all.length - versions.length;
 
             const notes: string[] = [];
+            if (deleted) {
+                notes.push(
+                    "This flow has been deleted. Its history is listed as it " +
+                        "stood at deletion; find_flow no longer lists it.",
+                );
+            }
             if (fetched.total === 0) {
                 notes.push(
-                    "This flow has no checked-in versions: it has only ever " +
-                        "been saved, never checked in or published.",
+                    "This flow has no versions at all: nothing has been " +
+                        "saved, checked in or published.",
                 );
-            } else if (versions.length === 0 && omitted > 0) {
+            } else if (versions.length === 0 && omitted > 0 && !published) {
                 notes.push(
                     `This flow has never been published; its ${omitted} ` +
-                        "version(s) are check-ins or saves. Set " +
-                        "includeCheckIns to list them.",
+                        "version(s) are check-ins, saves or undated versions. " +
+                        "Set includeCheckIns to list them.",
                 );
             } else if (omitted > 0) {
                 notes.push(
-                    `${omitted} check-in/save version(s) omitted. Set ` +
-                        "includeCheckIns to list them.",
+                    `${omitted} check-in, save or undated version(s) omitted. ` +
+                        "Set includeCheckIns to list them.",
                 );
             }
             if (fetched.entities.length < fetched.total) {
                 notes.push(
-                    `${fetched.total} versions exist but only the first ` +
-                        `${fetched.entities.length} the API returned were ` +
-                        "fetched, so some versions are missing from this list.",
+                    `${fetched.total} versions exist but only ` +
+                        `${fetched.entities.length} were fetched. The API ` +
+                        "pages versions by id string, not by date, so the " +
+                        "missing ones are an arbitrary set rather than the " +
+                        "oldest, and may include recent publishes.",
                 );
             }
             if (published && !versions.some((v) => v.isPublished)) {
@@ -277,6 +330,7 @@ export const flowVersions: ToolFactory<ToolConfig, typeof inputSchema> = ({
                 publishedVersion: published?.commitVersion ?? null,
                 versions,
                 total: fetched.total,
+                ...(deleted ? { deleted: true as const } : {}),
                 ...(notes.length > 0 ? { notes } : {}),
             };
             return {
@@ -291,6 +345,17 @@ export const flowVersions: ToolFactory<ToolConfig, typeof inputSchema> = ({
                         {
                             type: "text",
                             text: `Flow "${flowId}" not found. Check the flow id.`,
+                        },
+                    ],
+                };
+            }
+            if (status === 410) {
+                return {
+                    isError: true,
+                    content: [
+                        {
+                            type: "text",
+                            text: `Flow "${flowId}" has been deleted (410) and its versions could not be retrieved even as a deleted flow's.`,
                         },
                     ],
                 };
