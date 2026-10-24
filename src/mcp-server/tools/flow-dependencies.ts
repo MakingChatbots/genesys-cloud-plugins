@@ -1,8 +1,8 @@
 import type platformClient from "purecloud-platform-client-v2";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { formatApiError } from "./api-error.ts";
-import type { ToolFactory } from "./types.ts";
+import { formatApiError } from "../utilities/api-error.ts";
+import type { ToolFactory } from "../utilities/types.ts";
 
 function flowTypeToObjectType(flowType: string): string {
     const upper = flowType.toUpperCase();

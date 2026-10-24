@@ -1,6 +1,6 @@
 import type { Models, TextbotsApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import type { ToolFactory } from "./types.ts";
+import type { ToolFactory } from "../utilities/types.ts";
 
 const sessions = new Map<string, string>();
 
