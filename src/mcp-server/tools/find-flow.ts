@@ -101,7 +101,8 @@ export const findFlow: ToolFactory<ToolConfig, typeof inputSchema> = ({
             "a fragment of a word or a few words from the name both work; " +
             "flows whose name equals the query exactly are listed first. " +
             "The returned id is accepted verbatim by flow_ir, " +
-            "flow_action, search_in_flow and flow_dependencies. A " +
+            "flow_action, search_in_flow, flow_dependencies and " +
+            "flow_versions. A " +
             "publishedVersion of null means the flow has never been " +
             "published.",
         annotations: {
