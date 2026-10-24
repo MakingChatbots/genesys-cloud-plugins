@@ -176,8 +176,9 @@ const inputSchema = {
         .optional()
         .describe(
             "When true, check-in and save versions are listed alongside " +
-                "publishes. Off by default: only published versions, which " +
-                "are the ones that ever handled traffic, are returned.",
+                "publishes, as are undated versions of unknown kind. Off by " +
+                "default: only published versions, which are the ones that " +
+                "ever handled traffic, are returned.",
         ),
     includeAuthor: z
         .boolean()
@@ -197,21 +198,16 @@ export const flowVersions: ToolFactory<ToolConfig, typeof inputSchema> = ({
     config: {
         description:
             "Lists the versions of a Genesys Cloud Architect flow, newest " +
-            "first: each version's number, kind (publish, checkin, save), " +
-            "dateCreated, datePublished and datePublishedEnd (the exact " +
+            "first: each version's number, kind (publish, checkin, save, " +
+            "unknown), dateCreated, datePublished and datePublishedEnd (the " +
             "window in which it was the live version), and whether it is " +
             "the currently published one. Use it to answer when a flow " +
-            "changed ('which version was live at 09:30 on the 5th', 'when " +
-            "did v58 go out', 'has this been published since Tuesday') " +
-            "instead of bucketing flow aggregates by flowVersion. The " +
-            "version numbers " +
-            "are the flowVersion values find_flow_execution reports, so a " +
-            "run joins to the version it executed. The API records no " +
-            "publish comment, so what changed must be read from the " +
-            "configuration. Only publishes are listed unless " +
-            "includeCheckIns is set. Authors are omitted unless " +
-            "includeAuthor is set. A deleted flow's history is still " +
-            "listed, flagged deleted: true.",
+            "changed, e.g. 'which version was live at 09:30 on the 5th'. " +
+            "The version numbers are the flowVersion values " +
+            "find_flow_execution reports, and are accepted as flowVersion " +
+            "by flow_ir, flow_action, search_in_flow and get_prompts to " +
+            "read that version. The API records no publish comment, so " +
+            "what changed must be read from the configuration.",
         annotations: {
             title: "Flow Versions",
             readOnlyHint: true,

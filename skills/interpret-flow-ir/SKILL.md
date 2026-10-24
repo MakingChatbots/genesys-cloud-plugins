@@ -1,6 +1,6 @@
 ---
 name: interpret-flow-ir
-description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution, flow_execution_data or flow_versions tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), prompt questions ("what does the caller hear here", "what does Prompt.Welcome say"; resolve with get_prompts), execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"), and publish-history questions ("when was this flow last published", "which version was live at 09:30", "what changed on the 5th"; resolve with flow_versions, then read a version by passing it as flowVersion to the other tools). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
+description: Use when interpreting the JSON returned by the flow_ir, flow_action, search_in_flow, find_flow_execution, flow_execution_data or flow_versions tools, or when the user asks about a deployed Genesys Cloud Architect flow, including one named only by flow name (resolve with find_flow first) or a queue named only by queue name (resolve with find_queue first). Covers structural questions ("analyse this flow", "trace the path", "find dead logic", "does it loop"), semantic questions ("what does this decision check", "what does pressing 2 do"), search questions ("which actions reference this queue", "which use Flow.DNIS"), prompt questions ("what does the caller hear here", "what does Prompt.Welcome say"; resolve with get_prompts), execution questions about a real conversation or test run ("what did this conversation do", "why did the customer loop", "did the flow error", "is it working"), and publish-history questions ("when was this flow last published", "which version was live at 09:30", "what changed on the 5th"; resolve with flow_versions). Use it to answer control-flow questions from the IR rather than the raw configuration JSON, to find the actions worth inspecting, to fetch per-action settings the IR omits, and to read one run's execution data against the IR.
 ---
 
 # Interpreting Flow IRs
@@ -29,9 +29,12 @@ Every tool that reads a flow's configuration (`flow_ir`, `flow_action`,
 configuration unless given a `flowVersion`, which pins the read to one version:
 the `version` that `flow_versions` lists, or the `flowVersion` that
 `find_flow_execution` reports. Each response says which it read, as
-`configuration: { latest: true }` or `{ flowVersion }`. When the question is
-about a past publish or a particular run, pass the same `flowVersion` to every
-call in the chain, so the ids join consistently (see "Publish history").
+`configuration: { latest: true }` or `{ flowVersion }`, with `deleted: true`
+added when the flow has since been deleted but its configuration was still
+readable. When the question is about a past publish or a particular run, pass
+the same `flowVersion` to every call in the chain: a version never changes once
+created, so the ids join consistently and there is no redeploy race between
+calls.
 
 Likewise, when the user names a *queue* (e.g. "which actions transfer to Sales"),
 resolve it first with `find_queue`, which searches queue names and returns each
@@ -42,12 +45,9 @@ spelled in the flow.
 ## Tool output shape
 
 On success the tool returns compact JSON: `{ flowId, configuration, ir,
-warnings }`. `configuration` is `{ latest: true }` or `{ flowVersion }`,
-whichever the call read, with `deleted: true` added when the flow has since
-been deleted but its configuration was still readable. Failures (flow or
-version not found, unparseable configuration, unknown or ambiguous `task`
-value) arrive as plain-text tool errors, so any JSON response is a successful
-parse.
+warnings }`. Failures (flow or version not found, unparseable configuration,
+unknown or ambiguous `task` value) arrive as plain-text tool errors, so any
+JSON response is a successful parse.
 `warnings` is always present; read it before making claims, because each
 warning scopes what can be asserted (see "Warnings").
 
@@ -192,11 +192,10 @@ spoken or displayed label that select that action. This is what answers "what
 does pressing 2 do".
 
 **`notFound` and staleness.** An id in `notFound` is absent from the
-configuration the call read (`configuration` says which). Because `flow_ir` and
-`flow_action` are separate fetches, a flow read at its latest may have been
-redeployed between them: re-run `flow_ir` and re-join before concluding that an
-action was deleted. Passing the same `flowVersion` to both calls removes that
-race, since a version never changes once created.
+configuration the call read, not necessarily from the flow: the response's
+note says whether to re-run `flow_ir` on the latest configuration or to
+re-read with the matching `flowVersion`. Follow it before concluding that an
+action was deleted.
 
 **What it does and does not unlock.** `flow_action` does retrieve raw config for
 actions the IR treats as blind spots: a `DigitalMenuAction`'s unexpanded choices
@@ -252,26 +251,19 @@ user prompts; the former is already in the raw config, the latter is out of scop
 
 ## Publish history: the `flow_versions` tool
 
-A flow's **versions** are its numbered check-ins and publishes, plus at most
-one unnumbered entry for a pending save, and `flow_versions` lists them,
-newest first, with the exact times each one was live. Reach for it when the
-question is *when* a flow changed rather than *what* it does: "when did v58 go
-out", "which version was handling calls at 09:30 on the 5th", "has anyone
-published this since Tuesday", "how often does this flow change". One call
-replaces bucketing flow aggregates by `flowVersion` to guess at a publish time.
+`flow_versions` answers *when* a flow changed rather than *what* it does. One
+call replaces bucketing flow aggregates by `flowVersion` to guess at a publish
+time.
 
 **The envelope.**
 `{ flowId, flowName, flowType, publishedVersion, versions: [{ version, id, kind,
 dateCreated, datePublished, datePublishedEnd, isPublished, createdBy?,
-createdByClient? }], total, notes? }`
+createdByClient? }], total, deleted?, notes? }`
 
 - `version` is the checked-in version number Architect shows (`"57.0"`, as in
-  "Check in Version 57.0"). It is the same string
-  `find_flow_execution` reports as `flowVersion`, so a run joins to the
-  configuration it executed, and it is what the Architect UI and the flow
-  aggregates call the version. A pending save has no number: it is one
-  `save` entry whose `version` is its `saved_version_<guid>` id, and it
-  disappears once checked in or published, so saves never accumulate.
+  "Check in Version 57.0"). A pending save has no number: it is one `save`
+  entry whose `version` is its `saved_version_<guid>` id, and it disappears
+  once checked in or published, so saves never accumulate.
 - `datePublished` and `datePublishedEnd` bound the window in which that version
   was the live one, and consecutive publishes chain exactly: one version's end
   is the next one's start. **Which version handled a conversation at time T**
@@ -282,41 +274,25 @@ createdByClient? }], total, notes? }`
   Genesys only began recording it around mid-2023, so a version superseded
   before then has `null` however old or new it is, and its window closes at
   the next publish's `datePublished`.
-- `kind` is `publish`, `checkin` or `save`: the API's type field when it
-  returns one, otherwise derived from which dates it stamped. `publish` means
-  the version was the live one at some point. By default only publishes are
-  returned, since only they ever handled traffic; pass `includeCheckIns: true`
-  to see the work-in-progress check-ins between them. A version with no date
-  stamps at all is `unknown`; these occur only before 2023 and have in practice
-  always been check-ins (each sits seconds before the publish that followed),
-  so the default view omits them like check-ins.
+- `kind` is the API's type field when it returns one, otherwise derived from
+  which dates it stamped. `publish` means the version was the live one at some
+  point. A version with no date stamps at all is `unknown`; these occur only
+  before 2023 and have in practice always been check-ins (each sits seconds
+  before the publish that followed).
 - A publish creates its own version rather than promoting the last check-in:
   checking in 1.0 and then publishing unchanged yields a `publish` 2.0 with
   1.0 left as a `checkin`. A `checkin` directly before a `publish` is the
   normal workflow, not evidence of a separate change.
-- A **deleted flow** is still listed: the response carries `deleted: true` and
-  a note, and the history is as it stood at deletion, so `isPublished` and
-  `publishedVersion` then mean "live when deleted", not live now. A save made
-  after the last publish survives as the pending `save` entry. `find_flow` no longer
-  finds it, so the id must come from an execution record, a dependency
-  listing or the user. The reading tools likewise still return a deleted
-  flow's configuration, flagged `configuration.deleted: true`.
-- There is **no publish comment**: the API records none, so what a publish
-  changed must be read from the configurations themselves. Pass a listed
-  `version` as `flowVersion` to `flow_ir`, `search_in_flow`, `flow_action` or
-  `get_prompts` to read that version. "What changed in v58" is two reads, v57
-  and v58, compared: search both for the thing in question, or diff the two
-  IRs' nodes by id. Without `flowVersion` those tools read the latest
-  configuration, which is not any particular publish.
-- `createdBy` and `createdByClient` appear **only** when the caller passes
-  `includeAuthor: true`. The default output carries no person identifiers;
-  do not set the flag unless the user has asked who made a change and the data
-  owner has agreed to that being surfaced. Even then the API gives the user's
-  **id only**, not a name.
+- On a **deleted flow** (`deleted: true`) the history is as it stood at
+  deletion, so `isPublished` and `publishedVersion` mean "live when deleted",
+  not live now. `find_flow` no longer finds it, so the id must come from an
+  execution record, a dependency listing or the user.
+- **"What changed in v58"** is two reads, v57 and v58, compared: search both
+  for the thing in question, or diff the two IRs' nodes by id. Without
+  `flowVersion` the reading tools read the latest configuration, which is not
+  any particular publish.
+- `createdBy`, when requested, is the user's **id only**, not a name.
 - `publishedVersion: null` means the flow is not currently published.
-- `total` counts every version of every kind, before the publish-only filter
-  and before the fetch cap, so it routinely exceeds `versions.length`; `notes`
-  says how many were omitted and why.
 
 ## Content search: the `search_in_flow` tool
 
@@ -489,9 +465,7 @@ takenBranch? }` and each container event (`startedBotState`, `startedTask`)
 gains `ir: { nodeId, taskId, taskName }`; an event with `ir: null` found no
 node. The response's `ir` block then carries
 `configuration` (whether the join used the exact `flowVersion` that ran or fell
-back to the latest, with `deleted: true` added when the flow has since been
-deleted but its configuration was still readable), `unmatchedActionIds`,
-`unmatchedStateIds`,
+back to the latest), `unmatchedActionIds`, `unmatchedStateIds`,
 `actionsNotExecuted` (every IR action this run never reached, with its
 `reachable` flag) and the parse `warnings`. `actionsNotExecuted` is this run's
 *negative space*: the branches not taken. It is not dead logic; one run proves
@@ -505,9 +479,8 @@ module or bot flow, whose actions the parent flow's IR never contains. Do not
 report a redeploy without checking which.
 
 To inspect the version that ran with the static tools, pass the instance's
-`flowVersion` to `flow_ir`, `flow_action` and `search_in_flow` as `flowVersion`.
-Their ids then match the execution data's `actionId`s exactly, and the design
-being reasoned about is the one the customer experienced.
+`flowVersion` to them, so the design being reasoned about is the one the
+customer experienced.
 
 Three naming traps:
 
