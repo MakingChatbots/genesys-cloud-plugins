@@ -1,11 +1,15 @@
 import type platformClient from "purecloud-platform-client-v2";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { authHint, formatApiError, toApiError } from "./api-error.ts";
-import { type EntityRef, toEntityRef } from "./entity-ref.ts";
-import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
-import { nameKey } from "./name-match.ts";
-import type { ToolFactory } from "./types.ts";
+import {
+    authHint,
+    formatApiError,
+    toApiError,
+} from "../utilities/api-error.ts";
+import { type EntityRef, toEntityRef } from "../utilities/entity-ref.ts";
+import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import { nameKey } from "../utilities/name-match.ts";
+import type { ToolFactory } from "../utilities/types.ts";
 
 /**
  * Applied separately to the ids+names given and to a flow's references, so one

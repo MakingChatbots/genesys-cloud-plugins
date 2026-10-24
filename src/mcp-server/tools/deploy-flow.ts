@@ -8,7 +8,7 @@ import type {
     DeployValidation,
 } from "../../shared/deploy-result.ts";
 import { createRedactor, credentialSecrets } from "../../shared/redact.ts";
-import type { ToolFactory } from "./types.ts";
+import type { ToolFactory } from "../utilities/types.ts";
 
 interface RunnerLogLine {
     type: "log";

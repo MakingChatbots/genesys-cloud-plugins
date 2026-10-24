@@ -1,10 +1,17 @@
 import type platformClient from "purecloud-platform-client-v2";
 import type { RoutingApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { authHint, formatApiError, toApiError } from "./api-error.ts";
-import { type EntityRef, toEntityRef } from "./entity-ref.ts";
-import { isExactNameMatch, moveExactMatchToTop } from "./name-match.ts";
-import type { ToolFactory } from "./types.ts";
+import {
+    authHint,
+    formatApiError,
+    toApiError,
+} from "../utilities/api-error.ts";
+import { type EntityRef, toEntityRef } from "../utilities/entity-ref.ts";
+import {
+    isExactNameMatch,
+    moveExactMatchToTop,
+} from "../utilities/name-match.ts";
+import type { ToolFactory } from "../utilities/types.ts";
 
 const MAX_RETURNED_QUEUES = 50;
 const MAX_FETCHED_QUEUES = 200;

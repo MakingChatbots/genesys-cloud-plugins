@@ -9,9 +9,13 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi, Models } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { authHint, formatApiError, toApiError } from "./api-error.ts";
-import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
-import type { ToolFactory } from "./types.ts";
+import {
+    authHint,
+    formatApiError,
+    toApiError,
+} from "../utilities/api-error.ts";
+import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import type { ToolFactory } from "../utilities/types.ts";
 
 /**
  * Retrieval is a job: the first GET registers it and later GETs report its

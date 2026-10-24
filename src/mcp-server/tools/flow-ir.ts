@@ -4,9 +4,9 @@ import {
 } from "@makingchatbots/genesys-cloud-architect-diagram-lib";
 import type { ArchitectApi } from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
-import { fetchFlowConfiguration } from "./fetch-flow-configuration.ts";
-import { isExactNameMatch } from "./name-match.ts";
-import type { ToolFactory } from "./types.ts";
+import { fetchFlowConfiguration } from "../utilities/fetch-flow-configuration.ts";
+import { isExactNameMatch } from "../utilities/name-match.ts";
+import type { ToolFactory } from "../utilities/types.ts";
 
 /**
  * Resolve a task by exact id first, then by case-insensitive name. Task names
