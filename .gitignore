@@ -6,3 +6,6 @@ skills-lock.json
 .agents/
 .pnpm-store
 *.dev.ts
+
+# Skill eval cases and their results (run with `claude plugin eval`); local-only
+skills/*/evals/

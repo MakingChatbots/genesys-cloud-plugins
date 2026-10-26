@@ -1,9 +1,11 @@
 ---
 name: flow-diagram
-description: This skill should be used when the user asks to create a diagram, flowchart, flow visualization, dependency tree, architecture map, state machine, or pipeline view — including when they ask for an interactive, explorable, or pan-and-zoom diagram (this skill produces static diagrams and sets that expectation). Common trigger phrases include "visualize", "diagram", "flowchart", "graph", "map out", "show the flow", "draw the dependencies", "create a diagram".
+description: This skill should be used when the user asks to create a diagram, flowchart, flow visualization, dependency tree, architecture map, state machine, or pipeline view — including when they ask for an interactive, explorable, or pan-and-zoom diagram (this skill produces static diagrams and sets that expectation). Common trigger phrases include "visualize", "diagram", "flowchart", "graph", "map out", "show the flow", "draw the dependencies", "create a diagram". Produces Mermaid text; when the user wants an image that looks like the Architect editor's own canvas (a PNG or screenshot-like picture of a deployed flow, with a box highlighted), use the architect-diagram skill and its flow_diagram tool instead.
 ---
 
 # Flow Diagram Skill
+
+For a picture that looks like the Architect editor's own canvas (numbered action boxes, branch pills, a highlighted "this is the broken box"), use the `architect-diagram` skill instead; it renders PNG/SVG from `flow_ir` and `flow_action`. This skill is the text form.
 
 Create flow diagrams as Mermaid — text-based with automatic layout. Mermaid is diffable, cheap to generate, and renders natively in GitHub markdown (READMEs, PR and issue descriptions), Claude artifacts, and most docs tooling.
 
