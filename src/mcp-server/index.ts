@@ -8,6 +8,7 @@ import { findFlowExecution } from "./tools/find-flow-execution.ts";
 import { findQueue } from "./tools/find-queue.ts";
 import { flowAction } from "./tools/flow-action.ts";
 import { flowDependencies } from "./tools/flow-dependencies.ts";
+import { flowDiagram } from "./tools/flow-diagram.ts";
 import { flowExecutionData } from "./tools/flow-execution-data.ts";
 import { flowIr } from "./tools/flow-ir.ts";
 import { flowVersions } from "./tools/flow-versions.ts";
@@ -21,6 +22,8 @@ const envResults = z
         GENESYS_CLIENT_ID: z.string().min(1),
         GENESYS_CLIENT_SECRET: z.string().min(1),
         DEPLOY_SCRIPT_PATH: z.string().min(1),
+        // Where flow_diagram's rasteriser assets are; defaults to servers/assets
+        DIAGRAM_ASSETS_PATH: z.string().min(1).optional(),
         // Used for MCP Server smoke test in CI workflow
         PREVENT_LOGIN: z
             .enum(["TRUE", "FALSE"])
@@ -73,6 +76,16 @@ server.registerTool(
     "flow_action",
     flowActionTool.config,
     flowActionTool.handler,
+);
+
+const flowDiagramTool = flowDiagram({
+    architectApi,
+    assetsPath: envVars.DIAGRAM_ASSETS_PATH,
+});
+server.registerTool(
+    "flow_diagram",
+    flowDiagramTool.config,
+    flowDiagramTool.handler,
 );
 
 const searchInFlowTool = searchInFlow({ architectApi });

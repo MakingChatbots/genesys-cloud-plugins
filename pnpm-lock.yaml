@@ -11,6 +11,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.1
         version: 1.32.1(zod@4.6.7)
+      '@resvg/resvg-wasm':
+        specifier: 2.6.2
+        version: 2.6.2
       purecloud-flow-scripting-api-sdk-javascript:
         specifier: ^0.70.1
         version: 0.70.1
@@ -25,8 +28,8 @@ importers:
         specifier: 2.6.2
         version: 2.6.2
       '@makingchatbots/genesys-cloud-architect-diagram-lib':
-        specifier: ^1.6.1
-        version: 1.6.1
+        specifier: ^1.7.0
+        version: 1.7.0
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -284,8 +287,8 @@ packages:
     peerDependencies:
       hono: ^4 || ^5.0.0-0
 
-  '@makingchatbots/genesys-cloud-architect-diagram-lib@1.6.1':
-    resolution: {integrity: sha512-axrIkythQbbJw2Jsmn8ExatMMXfuRilBIyEfujM58ib6gKpiSLnJzk2EZkpPK29KpEwPgejOh9ll5hHyGondIA==, tarball: https://npm.pkg.github.com/download/@makingchatbots/genesys-cloud-architect-diagram-lib/1.6.1/e6b35ee3ab0a6b8b8f4b67129f0e1da72c26c7b6}
+  '@makingchatbots/genesys-cloud-architect-diagram-lib@1.7.0':
+    resolution: {integrity: sha512-07SGPMdq3e1MDTGuLEawDCX4LaB3mjPieNArTE+n+FSUsxirPHOElX/Hpzkg/pY3aywo1eBA3PkxoIwRO8Sk+w==, tarball: https://npm.pkg.github.com/download/@makingchatbots/genesys-cloud-architect-diagram-lib/1.7.0/a2c36cd3cf5ccf0aba66e0db0f6e17e08fd428d1}
     engines: {node: '>=22.12'}
 
   '@modelcontextprotocol/sdk@1.32.1':
@@ -297,6 +300,10 @@ packages:
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
+
+  '@resvg/resvg-wasm@2.6.2':
+    resolution: {integrity: sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw==}
+    engines: {node: '>= 10'}
 
   '@so-ric/colorspace@1.1.6':
     resolution: {integrity: sha512-/KiKkpHNOBgkFJwu9sh48LkHSMYGyuTcSFK/qMBdnOAlrRJzRSXAOFB5qwzaVQuDl8wAvHVMkaASQDReTahxuw==}
@@ -1097,7 +1104,7 @@ snapshots:
     dependencies:
       hono: 4.13.13
 
-  '@makingchatbots/genesys-cloud-architect-diagram-lib@1.6.1': {}
+  '@makingchatbots/genesys-cloud-architect-diagram-lib@1.7.0': {}
 
   '@modelcontextprotocol/sdk@1.32.1(zod@4.6.7)':
     dependencies:
@@ -1120,6 +1127,8 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
+
+  '@resvg/resvg-wasm@2.6.2': {}
 
   '@so-ric/colorspace@1.1.6':
     dependencies:
