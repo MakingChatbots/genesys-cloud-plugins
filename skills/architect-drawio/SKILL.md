@@ -47,7 +47,7 @@ else spawn(process.platform==="darwin"?"open":"xdg-open",[url],{detached:true,st
 ' DIAGRAM.drawio
 ```
 
-Say that red outlines and tags (if used) are additions the editor does not draw. For a large diagram, a headless screenshot of the link (Playwright or Chrome DevTools) is a cheap check that a bus did not come out crooked.
+Say that red outlines and tags (if used) are additions the editor does not draw. For a large diagram, check that no bus came out crooked by reading back the edge waypoints: every point on one bus shares the same `y`, and each column drops at its own centre `x`. If the session happens to have a browser tool, such as a Playwright or Chrome DevTools MCP server, a screenshot of the link is a quicker check, but do not install one for this.
 
 ## Geometry (draw.io units = Architect CSS px)
 
