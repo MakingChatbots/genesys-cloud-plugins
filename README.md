@@ -88,6 +88,14 @@ understand flows, it can be used to document them too...
 
 [Read more...](https://makingchatbots.com/i/213933939/documenting-your-flows-with-ai)
 
+#### Convert flows to draw.io (diagrams.net)
+
+It's even possible to have a flow converted to a fully editable diagram in draw.io:
+
+> Create the flow 'Bookshop Bot' in draw.io
+
+<img src="docs/assets/flow-in-drawio.png" width="500">
+
 ### Run automated tests against Digital flows
 
 The plugin allows Claude Code to run tests against Digital bot flows. This is useful when
