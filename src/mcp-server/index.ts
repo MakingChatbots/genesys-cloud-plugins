@@ -130,6 +130,7 @@ server.registerTool(
 
 const testBotFlowTool = testBotFlow({
     textbotsApi: new platformClient.TextbotsApi(),
+    architectApi,
 });
 server.registerTool(
     "test_bot_flow",
