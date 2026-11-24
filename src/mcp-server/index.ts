@@ -13,6 +13,7 @@ import { flowExecutionData } from "./tools/flow-execution-data.ts";
 import { flowIr } from "./tools/flow-ir.ts";
 import { flowVersions } from "./tools/flow-versions.ts";
 import { getPrompts } from "./tools/get-prompts.ts";
+import { orgDetails } from "./tools/org-details.ts";
 import { searchInFlow } from "./tools/search-in-flow.ts";
 import { testBotFlow } from "./tools/test-bot-flow.ts";
 
@@ -47,6 +48,15 @@ const server = new McpServer({
 
 const architectApi = new platformClient.ArchitectApi();
 const routingApi = new platformClient.RoutingApi();
+
+const orgDetailsTool = orgDetails({
+    organizationApi: new platformClient.OrganizationApi(),
+});
+server.registerTool(
+    "org_details",
+    orgDetailsTool.config,
+    orgDetailsTool.handler,
+);
 
 const findFlowTool = findFlow({ architectApi });
 server.registerTool("find_flow", findFlowTool.config, findFlowTool.handler);

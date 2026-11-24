@@ -104,6 +104,8 @@ Fix any errors before deploying.
 
 ### 5. Deploy
 
+If the user has named the org they expect to deploy to (e.g. "deploy this to our dev org"), call the `org_details` MCP tool first and check that the connected org matches. If it doesn't, or you can't tell, stop and tell the user which org the server is connected to (name and shortName) instead of deploying. The server deploys to whichever org its OAuth client belongs to.
+
 Use the `deploy_flow` MCP tool:
 
 ```
