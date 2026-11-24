@@ -129,7 +129,7 @@ The result is structured, not a log dump:
   "flowUrl": "https://apps.…/architect/#/bot/flows/…",
   "replacedFlowId": "…",
   "validation": { "errors": [], "warnings": [] },
-  "sdkVersion": "0.70.1",
+  "sdkVersion": "0.71.2",
   "durationMs": 12345
 }
 ```

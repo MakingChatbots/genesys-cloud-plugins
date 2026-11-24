@@ -8,6 +8,10 @@ import type {
     DeployValidation,
 } from "../../shared/deploy-result.ts";
 import { createRedactor, credentialSecrets } from "../../shared/redact.ts";
+import {
+    findArchitectSdkRegion,
+    knownApiDomains,
+} from "../utilities/find-architect-sdk-region.ts";
 import type { ToolFactory } from "../utilities/types.ts";
 
 interface RunnerLogLine {
@@ -54,6 +58,7 @@ const MAX_DIAGNOSIS_LINES = 10;
 
 export interface DeployFlowConfig {
     readonly deployScriptPath: string;
+    /** Platform API domain, e.g. "mypurecloud.de". */
     readonly region: string;
     readonly clientId: string;
     readonly clientSecret: string;
@@ -165,24 +170,30 @@ export const deployFlow: ToolFactory<DeployFlowConfig, typeof inputSchema> = (
         const redact = createRedactor(
             credentialSecrets(toolConfig.clientId, toolConfig.clientSecret),
         );
+        const createFailureResponse = (error: string) => ({
+            isError: true,
+            content: [
+                {
+                    type: "text" as const,
+                    text: JSON.stringify(
+                        buildResult({ error, logs: [], verbose, startedAt }),
+                    ),
+                },
+            ],
+        });
+
+        const sdkRegion = findArchitectSdkRegion(toolConfig.region);
+        if (!sdkRegion) {
+            return createFailureResponse(
+                `Unknown region "${toolConfig.region}". Known API domains: ${knownApiDomains().join(", ")}`,
+            );
+        }
+
         const absolutePath = path.resolve(flowFile);
         if (!fs.existsSync(absolutePath)) {
-            return {
-                isError: true,
-                content: [
-                    {
-                        type: "text",
-                        text: JSON.stringify(
-                            buildResult({
-                                error: `Flow file not found: ${absolutePath}`,
-                                logs: [],
-                                verbose,
-                                startedAt,
-                            }),
-                        ),
-                    },
-                ],
-            };
+            return createFailureResponse(
+                `Flow file not found: ${absolutePath}`,
+            );
         }
 
         const nodeArgs = [
@@ -244,7 +255,7 @@ export const deployFlow: ToolFactory<DeployFlowConfig, typeof inputSchema> = (
             const child = spawn("node", nodeArgs, {
                 env: {
                     ...process.env,
-                    GENESYS_REGION: toolConfig.region,
+                    GENESYS_ARCHITECT_SDK_REGION: sdkRegion,
                     GENESYS_CLIENT_ID: toolConfig.clientId,
                     GENESYS_CLIENT_SECRET: toolConfig.clientSecret,
                 },

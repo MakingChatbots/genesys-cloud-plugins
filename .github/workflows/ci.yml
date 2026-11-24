@@ -25,6 +25,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm run lint
       - run: pnpm run typecheck # Check TS types. Not done by linting or building
+      - run: pnpm test
       - run: pnpm run build
       - name: Verify committed bundles match source
         run: |

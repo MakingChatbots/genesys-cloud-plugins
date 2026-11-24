@@ -1,7 +1,9 @@
+import { writeSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import platformClient from "purecloud-platform-client-v2";
 import { z } from "zod/v3";
+import { createRedactor, credentialSecrets } from "../shared/redact.ts";
 import { deployFlow } from "./tools/deploy-flow.ts";
 import { findFlow } from "./tools/find-flow.ts";
 import { findFlowExecution } from "./tools/find-flow-execution.ts";
@@ -16,6 +18,15 @@ import { getPrompts } from "./tools/get-prompts.ts";
 import { orgDetails } from "./tools/org-details.ts";
 import { searchInFlow } from "./tools/search-in-flow.ts";
 import { testBotFlow } from "./tools/test-bot-flow.ts";
+
+/**
+ * Writes the message synchronously before exiting: console.error to a pipe is
+ * asynchronous on macOS, so process.exit straight after it can drop the line.
+ */
+function exitWithError(message: string): never {
+    writeSync(2, `${message}\n`);
+    process.exit(1);
+}
 
 const envResults = z
     .object({
@@ -35,8 +46,7 @@ const envResults = z
 
 if (!envResults.success) {
     const missing = envResults.error.issues.map((i) => i.path[0]).join("\n ");
-    console.error(`Missing required environment variables:\n ${missing}`);
-    process.exit(1);
+    exitWithError(`Missing required environment variables:\n ${missing}`);
 }
 
 const envVars = envResults.data;
@@ -165,6 +175,19 @@ void (async () => {
     const transport = new StdioServerTransport();
     await server.connect(transport);
 })().catch((err) => {
-    console.error("Failed to start server:", err);
-    process.exit(1);
+    const redact = createRedactor(
+        credentialSecrets(
+            envVars.GENESYS_CLIENT_ID,
+            envVars.GENESYS_CLIENT_SECRET,
+        ),
+    );
+    // Never log the raw error: the SDK's login failures are Axios errors whose
+    // config and request carry the `Authorization: Basic` header.
+    const message = err instanceof Error ? err.message : String(err);
+    const reply = err?.response?.data;
+    exitWithError(
+        redact(
+            `Failed to start server: ${message}${reply ? ` - ${JSON.stringify(reply)}` : ""}`,
+        ),
+    );
 });
