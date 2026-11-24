@@ -34,13 +34,14 @@ This plugin allows you to:
    * `Architect > Job > *`
    * `Architect > UI > *`
    * `Language Understanding > NLU Domain Version > View`
-   * `Textbots > *`
+   * `Text Bots > Bot Flow Session > Execute`
    * `Architect > Dependency Tracking > View`
    * `Routing > Queue > View`
    * `Architect > Flow Instance > View`
    * `Architect > Flow Instance > Search`
    * `Architect > Flow Instance Execution Data > View`
    * `Architect > User Prompt > View`
+   * `OAuth > Client > View`
 
 ## Usage
 
