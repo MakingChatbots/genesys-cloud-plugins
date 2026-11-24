@@ -392,44 +392,6 @@ function startSession(
     });
 }
 
-// ── Region mapping ────────────────────────────────────────────────────
-// The Platform Client SDK uses API domains (e.g. "usw2.pure.cloud") but
-// the Architect Scripting SDK expects enum strings (e.g. "prod_us_west_2").
-
-const API_DOMAIN_TO_SDK_REGION: Record<string, string> = {
-    "mypurecloud.com": "prod_us_east_1",
-    "use2.us-gov-pure.cloud": "prod_us_east_2",
-    "usw2.pure.cloud": "prod_us_west_2",
-    "cac1.pure.cloud": "prod_ca_central_1",
-    "mypurecloud.ie": "prod_eu_west_1",
-    "euw2.pure.cloud": "prod_eu_west_2",
-    "euc1.pure.cloud": "prod_eu_central_1",
-    "euc2.pure.cloud": "prod_eu_central_2",
-    "apse2.pure.cloud": "prod_ap_southeast_2",
-    "apne1.pure.cloud": "prod_ap_northeast_1",
-    "apne2.pure.cloud": "prod_ap_northeast_2",
-    "apne3.pure.cloud": "prod_ap_northeast_3",
-    "aps1.pure.cloud": "prod_ap_south_1",
-    "apse1.pure.cloud": "prod_ap_southeast_1",
-    "mec1.pure.cloud": "prod_me_central_1",
-    "sae1.pure.cloud": "prod_sa_east_1",
-    "afs1.pure.cloud": "prod_af_south_1",
-};
-
-function toArchitectSdkRegion(
-    scripting: ArchitectScripting,
-    apiDomain: string,
-): string | undefined {
-    const mapped = API_DOMAIN_TO_SDK_REGION[apiDomain];
-    if (mapped) return mapped;
-    const locations = scripting.enums.archEnums.LOCATIONS as Record<
-        string,
-        string
-    >;
-    if (Object.values(locations).includes(apiDomain)) return apiDomain;
-    return undefined;
-}
-
 // ── Result assembly ───────────────────────────────────────────────────
 
 /** Validation issues captured from the SDK log, split by severity. */
@@ -521,15 +483,19 @@ async function main(): Promise<void> {
 
     const absoluteFlowPath = path.resolve(flowFile);
 
-    const region = process.env.GENESYS_REGION;
+    // Architect Scripting SDK region such as "prod_eu_central_1", which
+    // is different to the domain style region the Platform SDK uses e.g. "mypurecloud.de".
+    // deploy_flow derives it from the Platform API domain the MCP
+    // server logs in with.
+    const sdkRegion = process.env.GENESYS_ARCHITECT_SDK_REGION;
     const clientId = process.env.GENESYS_CLIENT_ID;
     const clientSecret = process.env.GENESYS_CLIENT_SECRET;
 
-    if (!region || !clientId || !clientSecret) {
+    if (!sdkRegion || !clientId || !clientSecret) {
         emit(
             "result",
             failure(
-                "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET",
+                "Missing required environment variables: GENESYS_ARCHITECT_SDK_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET",
             ),
         );
         process.exit(1);
@@ -543,12 +509,15 @@ async function main(): Promise<void> {
         scripting.environment.ArchScriptingInfo?.version,
     );
 
-    const sdkRegion = toArchitectSdkRegion(scripting, region);
-    if (!sdkRegion) {
+    // The SDK names its list of regions LOCATIONS.
+    const sdkRegions = Object.values(
+        scripting.enums.archEnums.LOCATIONS as Record<string, string>,
+    );
+    if (!sdkRegions.includes(sdkRegion)) {
         emit(
             "result",
             failure(
-                `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`,
+                `Architect Scripting SDK${sdkVersion ? ` ${sdkVersion}` : ""} does not support region "${sdkRegion}". Supported regions: ${sdkRegions.join(", ")}`,
             ),
         );
         process.exit(1);

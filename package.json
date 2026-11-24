@@ -2,6 +2,9 @@
   "name": "genesys-cloud-architect",
   "version": "2.0.11",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@11.1.3+sha512.c85357fe17ca12dd23dd7071822666dfd7e3cb76fe214e3370b5ea2fb34f2a231185509b63e717f3cd0acb38dd3f8d82bcd5e8172400ae678b70ea4fbed0896d",
   "author": {
     "name": "Lucas Woodward",
@@ -21,6 +24,7 @@
     "build:diagram-assets": "mkdir -p servers/assets && cp node_modules/@resvg/resvg-wasm/index_bg.wasm servers/assets/resvg.wasm",
     "build:deploy-runner": "esbuild src/deploy-runner/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=scripts/deploy-runner.js",
     "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "lint": "biome check",
     "lint:fix": "biome check --write",
     "format": "biome format --write",
@@ -36,8 +40,8 @@
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "husky": "^9.1.7",
-    "purecloud-flow-scripting-api-sdk-javascript": "^0.70.1",
-    "purecloud-platform-client-v2": "^264.0.0",
+    "purecloud-flow-scripting-api-sdk-javascript": "^0.71.2",
+    "purecloud-platform-client-v2": "^267.0.0",
     "typescript": "^7.0.2",
     "zod": "^4.6.7"
   }
