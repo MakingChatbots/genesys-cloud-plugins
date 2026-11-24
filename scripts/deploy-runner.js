@@ -128807,32 +128807,6 @@ function startSession(scripting, { region, clientId, clientSecret }) {
     );
   });
 }
-var API_DOMAIN_TO_SDK_REGION = {
-  "mypurecloud.com": "prod_us_east_1",
-  "use2.us-gov-pure.cloud": "prod_us_east_2",
-  "usw2.pure.cloud": "prod_us_west_2",
-  "cac1.pure.cloud": "prod_ca_central_1",
-  "mypurecloud.ie": "prod_eu_west_1",
-  "euw2.pure.cloud": "prod_eu_west_2",
-  "euc1.pure.cloud": "prod_eu_central_1",
-  "euc2.pure.cloud": "prod_eu_central_2",
-  "apse2.pure.cloud": "prod_ap_southeast_2",
-  "apne1.pure.cloud": "prod_ap_northeast_1",
-  "apne2.pure.cloud": "prod_ap_northeast_2",
-  "apne3.pure.cloud": "prod_ap_northeast_3",
-  "aps1.pure.cloud": "prod_ap_south_1",
-  "apse1.pure.cloud": "prod_ap_southeast_1",
-  "mec1.pure.cloud": "prod_me_central_1",
-  "sae1.pure.cloud": "prod_sa_east_1",
-  "afs1.pure.cloud": "prod_af_south_1"
-};
-function toArchitectSdkRegion(scripting, apiDomain) {
-  const mapped = API_DOMAIN_TO_SDK_REGION[apiDomain];
-  if (mapped) return mapped;
-  const locations = scripting.enums.archEnums.LOCATIONS;
-  if (Object.values(locations).includes(apiDomain)) return apiDomain;
-  return void 0;
-}
 function validationFromLog() {
   const texts = (severity) => validationIssues.filter((i) => i.severity === severity).map((i) => i.text);
   return { errors: texts("error"), warnings: texts("warning") };
@@ -128891,14 +128865,14 @@ async function main() {
     process.exit(1);
   }
   const absoluteFlowPath = import_node_path.default.resolve(flowFile);
-  const region = process.env.GENESYS_REGION;
+  const location2 = process.env.ARCHITECT_LOCATION;
   const clientId = process.env.GENESYS_CLIENT_ID;
   const clientSecret = process.env.GENESYS_CLIENT_SECRET;
-  if (!region || !clientId || !clientSecret) {
+  if (!location2 || !clientId || !clientSecret) {
     emit(
       "result",
       failure(
-        "Missing required environment variables: GENESYS_REGION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET"
+        "Missing required environment variables: ARCHITECT_LOCATION, GENESYS_CLIENT_ID, GENESYS_CLIENT_SECRET"
       )
     );
     process.exit(1);
@@ -128909,19 +128883,21 @@ async function main() {
   sdkVersion = nonEmptyString(
     scripting.environment.ArchScriptingInfo?.version
   );
-  const sdkRegion = toArchitectSdkRegion(scripting, region);
-  if (!sdkRegion) {
+  const locations = Object.values(
+    scripting.enums.archEnums.LOCATIONS
+  );
+  if (!locations.includes(location2)) {
     emit(
       "result",
       failure(
-        `Unknown region "${region}". Known API domains: ${Object.keys(API_DOMAIN_TO_SDK_REGION).join(", ")}`
+        `Architect Scripting SDK${sdkVersion ? ` ${sdkVersion}` : ""} does not support location "${location2}". Supported locations: ${locations.join(", ")}`
       )
     );
     process.exit(1);
   }
-  emit("log", "info", `Starting SDK session (region: ${sdkRegion})...`);
+  emit("log", "info", `Starting SDK session (location: ${location2})...`);
   const session = await startSession(scripting, {
-    region: sdkRegion,
+    region: location2,
     clientId,
     clientSecret
   });
